@@ -1,0 +1,22 @@
+{
+  "name": "smokestack",
+  "version": "0.0.0-pr00",
+  "private": true,
+  "type": "module",
+  "description": "Prospective onchain formation and public-attention divergence research system.",
+  "engines": {
+    "node": "24.19.0",
+    "npm": "11.17.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/foundation.test.js",
+    "check": "npm run typecheck && npm run test",
+    "smokestack": "node dist/src/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "24.11.2",
+    "typescript": "6.0.3"
+  }
+}
