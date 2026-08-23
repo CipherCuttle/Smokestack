@@ -58,16 +58,18 @@ Smokestack intends to qualify DeepSeek Harness as an **optional development cont
 Target topology:
 
 ```text
-subscription Codex orchestrator (read-only)
-              |
-              v
-            DSH
-        /           \
-Codex worker     Claude reviewer
- bounded write      read-only
+OpenRouter -> DeepSeek V4 Flash parent
+                 |
+                 v
+                DSH
+            /         \
+   Codex worker     Claude reviewer
+    bounded write      read-only
 ```
 
-The target development treatment requires no `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or DeepSeek model API key. Native coding-product subscription/account authentication stays outside the repository. DSH is not allowed to mutate Smokestack until its disposable-fixture qualification ladder passes, and failure of that tooling experiment does not block Smokestack development.
+The parent candidate is pinned to `deepseek/deepseek-v4-flash-0731` through OpenRouter. `OPENROUTER_API_KEY` is scoped to the parent route only. Codex and Claude children remain native/subscription-authenticated and must not receive the OpenRouter credential or their own model API-key overlays.
+
+DSH is not allowed to mutate Smokestack until its disposable-fixture qualification ladder passes, and failure of that tooling experiment does not block Smokestack development.
 
 See [`docs/DSH_BUILD_CONTROL.md`](docs/DSH_BUILD_CONTROL.md) and [`docs/ADR/0006-dsh-development-control-plane.md`](docs/ADR/0006-dsh-development-control-plane.md).
 
