@@ -17,8 +17,8 @@ This phase exists only because Smokestack intends to use DeepSeek Harness as a d
 Run the ordered qualification ladder in `docs/DSH_BUILD_CONTROL.md`:
 
 1. `DSH-Q0` cold install/runtime closure;
-2. `DSH-Q1` subscription identity isolation + zero-model compatibility;
-3. `DSH-Q2` structured native Codex parent spike;
+2. `DSH-Q1` OpenRouter parent route + native child identity qualification;
+3. `DSH-Q2` DeepSeek V4 Flash parent tool-loop qualification;
 4. `DSH-Q3` one bounded Codex implementer;
 5. `DSH-Q4` mechanically read-only Claude reviewer;
 6. `DSH-Q5` one severe-repair/rereview cycle;
@@ -26,7 +26,7 @@ Run the ordered qualification ladder in `docs/DSH_BUILD_CONTROL.md`:
 
 No DSH model-backed qualification run may target Smokestack itself before Q5 closes mechanically correct; comparative evaluation uses unseen disposable engineering fixtures. DSH becomes the default build path only after Q6 establishes enough quality/reliability/governance value to justify its orchestration tax.
 
-No coding-model API keys are introduced to rescue qualification.
+`OPENROUTER_API_KEY` is authorized only for the parent route during qualification. Do not add OpenAI or Anthropic API keys to rescue native child qualification.
 
 Exit:
 - `DSH_BUILD_CONTROL_QUALIFIED`: DSH may be used for later Smokestack implementation PRs under the frozen protocol;
