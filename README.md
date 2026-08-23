@@ -51,6 +51,26 @@ The initial scientific claim is deliberately narrower than “find gems”:
 
 `EMBER` is a later, separate economic hypothesis and is not part of V0.
 
+## Development orchestration
+
+Smokestack intends to qualify DeepSeek Harness as an **optional development control plane**, not an application dependency.
+
+Target topology:
+
+```text
+subscription Codex orchestrator (read-only)
+              |
+              v
+            DSH
+        /           \
+Codex worker     Claude reviewer
+ bounded write      read-only
+```
+
+The target development treatment requires no `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or DeepSeek model API key. Native coding-product subscription/account authentication stays outside the repository. DSH is not allowed to mutate Smokestack until its disposable-fixture qualification ladder passes, and failure of that tooling experiment does not block Smokestack development.
+
+See [`docs/DSH_BUILD_CONTROL.md`](docs/DSH_BUILD_CONTROL.md) and [`docs/ADR/0006-dsh-development-control-plane.md`](docs/ADR/0006-dsh-development-control-plane.md).
+
 ## Read first
 
 - [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md)
@@ -60,9 +80,10 @@ The initial scientific claim is deliberately narrower than “find gems”:
 - [`docs/ENGINEERING_CONSTITUTION.md`](docs/ENGINEERING_CONSTITUTION.md)
 - [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/DSH_BUILD_CONTROL.md`](docs/DSH_BUILD_CONTROL.md)
 
 ## Non-goals for V0
 
-No trading, custody, transaction signing, “smart money” claims, alpha score, confidence score, embeddings, vector DB, graph DB, ML/LLM decision path, public UI, Telegram alerts, multi-chain support, Python service, Rust verifier, Redis, Kafka, or microservices.
+No trading, custody, transaction signing, “smart money” claims, alpha score, confidence score, embeddings, vector DB, graph DB, ML/LLM decision path, public UI, Telegram alerts, multi-chain support, Python application service, Rust verifier, Redis, Kafka, or microservices.
 
 Those are not missing features. They are intentionally unauthorized until earlier stage evidence earns them.
