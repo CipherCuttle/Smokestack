@@ -4,7 +4,7 @@ Status: ACCEPTED for PR-00
 
 ## Context
 
-Smokestack may use DeepSeek Harness (DSH) to coordinate independent coding-agent identities while the application itself remains a small TypeScript modular monolith.
+Smokestack may use DeepSeek Harness (DSH) to coordinate independent coding-agent roles while the application itself remains a small TypeScript modular monolith.
 
 DSH is currently a developer-preview project with compatibility-breaking changes expected. The earlier QntyLab DSH lineage also demonstrated that a build harness can accumulate its own prerequisite chain: runtime materialization, profile composition, executable identity, ambient home state, provider ordering, claim transport, and retry semantics all became blockers before useful repository work occurred.
 
@@ -15,7 +15,7 @@ Smokestack must obtain the benefits of bounded multi-agent development without m
 DSH is **tooling**, not application architecture.
 
 - `src/**` MUST NOT import DSH packages or DSH-generated runtime state.
-- a clean Smokestack build/test MUST NOT require DSH, Codex, Claude, coding-agent authentication, or a DSH home;
+- a clean Smokestack build/test MUST NOT require DSH, Codex, Claude, coding-agent authentication, an OpenRouter key, or a DSH home;
 - DSH tooling lives under `tooling/dsh/` only after its qualification stage begins;
 - DSH receives its own exact version/commit identity and lockfile;
 - an unqualified DSH installation MUST NOT mutate Smokestack;
@@ -25,9 +25,9 @@ DSH is **tooling**, not application architecture.
 ## Intended topology
 
 ```text
-subscription-authenticated Codex orchestrator
+OpenRouter -> DeepSeek V4 Flash parent
               |
-      governed tool calls
+      governed DSH tools
               v
        DSH control boundary
         /             \
@@ -40,23 +40,32 @@ Codex implementer   Claude reviewer
        tests + receipts
 ```
 
-The orchestrator must have no direct repository write authority. The implementer owns the bounded write surface. The reviewer cannot repair findings.
+The parent has orchestration authority only and no direct repository write route. The implementer owns the bounded write surface. The reviewer cannot repair findings.
 
 ## Authentication decision
 
-Coding-agent authentication remains native to the coding products and outside Smokestack/DSH semantic policy.
+The parent is intentionally API-backed through OpenRouter. The native coding children remain subscription-authenticated.
 
-The target configuration contains **no `OPENAI_API_KEY` and no `ANTHROPIC_API_KEY`**. Each coding identity is authenticated interactively through its native subscription/account flow before DSH is invoked. DSH receives only explicit non-secret identity/home references required to launch the selected native product.
+Target secret layout:
 
-This statement applies to coding-agent authentication only. Future market/social data providers may have their own independent credential requirements during source qualification.
+- `OPENROUTER_API_KEY`: parent route only;
+- no `OPENAI_API_KEY` for Codex child execution;
+- no `ANTHROPIC_API_KEY` for Claude reviewer execution;
+- no direct DeepSeek API key.
+
+The exact parent model is pinned to `deepseek/deepseek-v4-flash-0731`; a floating `latest` alias is not permitted in a qualified protocol.
+
+Native child account state is created interactively outside Smokestack/DSH. DSH receives only the explicit non-secret home/identity references required to launch the selected native products. Parent and child credentials must never cross role boundaries.
+
+Future market/social data providers may have their own independent credential requirements during source qualification.
 
 ## Parent integration decision
 
-Do not route the orchestrator through an API-metered DSH LLM provider merely because that path already exists.
+Use DSH's upstream provider-neutral `llm-pi-ai` seam against OpenRouter's OpenAI-compatible endpoint before considering any custom parent adapter.
 
-The preferred native-parent spike uses Codex `app-server --stdio` with structured JSON-RPC and dynamic tools. The controller exposes only governed orchestration operations to the parent. Terminal-output scraping is forbidden.
+This deliberately abandons the earlier keyless-native-Codex-parent idea. The OpenRouter parent is simpler, upstream-aligned, cheap enough for bounded orchestration, and avoids another custom protocol/launcher prerequisite chain.
 
-If a native Codex parent cannot be made structured, observable, read-only, bounded, and reproducible without fragile integration, the native-parent thesis is killed. A simpler external/manual orchestrator may remain available, but it does not inherit the stronger DSH-parent claim.
+The parent receives only the tools required by the frozen lifecycle. Generic repository write authority is forbidden. Provider retries are zero in the first qualified protocol; parent request count is mechanically bounded outside the prompt.
 
 ## No remote claim machinery in V0 tooling
 
@@ -70,12 +79,14 @@ Remote claim machinery may be proposed only through a later ADR after a real dis
 
 Positive:
 - DSH cannot infect product runtime dependencies;
-- the product remains buildable if all agent subscriptions are unavailable;
-- subscription-native orchestration can be tested cheaply on disposable fixtures;
+- parent integration uses an upstream-supported provider seam;
+- only one model API credential is required, isolated to the parent;
+- Codex/Claude can still use native subscription auth;
 - failures in DSH qualification are cheap and isolated;
 - QntyLab's useful lessons are preserved without copying its governance/runtime prerequisite stack.
 
 Negative:
-- DSH receives a separate qualification step before it can accelerate product work;
-- a native Codex-parent bridge may require a small Smokestack-owned tooling adapter/controller;
-- coding-agent subscription limits still exist even when API keys are absent.
+- parent orchestration now has a small metered API cost;
+- `OPENROUTER_API_KEY` becomes a development-tool secret to protect;
+- DSH still needs a separate qualification step before it can accelerate product work;
+- coding-agent subscription limits and provider policy still apply to the native children.
