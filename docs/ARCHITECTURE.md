@@ -26,24 +26,30 @@ src/** MUST NOT import tooling/dsh/** or DSH packages
 ```text
                     BUILD-TIME ONLY
 
-Codex orchestrator ---> DSH control ---> Codex implementer
-       read-only             |              worktree-write
-                             |
-                             +---------> Claude reviewer
-                                        read-only
-
-                             |
-                             v
-                         Git candidate
-                             |
-========================= BOUNDARY =========================
-                             |
-                             v
-                     SMOKESTACK APPLICATION
-                     Node/TypeScript + later PostgreSQL
+OpenRouter -> DeepSeek V4 Flash parent
+                    |
+                    v
+                 DSH control
+                /           \
+               v             v
+      Codex implementer   Claude reviewer
+        worktree-write       read-only
+                \           /
+                 \         /
+                  v       v
+                 tests + receipt
+                      |
+                      v
+                  Git candidate
+                      |
+================== BOUNDARY ==================
+                      |
+                      v
+              SMOKESTACK APPLICATION
+              Node/TypeScript + later PostgreSQL
 ```
 
-A clean checkout must build/test without DSH, Codex, Claude, coding-agent auth state, or a DSH home. DSH failure therefore cannot become an application outage or package prerequisite.
+The parent has orchestration authority but no direct repository write route. A clean checkout must build/test without DSH, OpenRouter, Codex, Claude, coding-agent auth state, or a DSH home. DSH failure therefore cannot become an application outage or package prerequisite.
 
 See ADR-0006 and `docs/DSH_BUILD_CONTROL.md`.
 
