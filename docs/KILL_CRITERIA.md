@@ -6,10 +6,79 @@ Kill criteria are product features, not pessimism. Their purpose is to stop sunk
 
 Block advancement if:
 - clean checkout cannot run the documented bootstrap/check command;
-- a second runtime language is required without demonstrated need;
+- a second application runtime language is required without demonstrated need;
 - CI needs mutable action tags or broad token permissions;
 - a known shortcut is required to make checks pass;
 - a direct dependency lacks a documented purpose.
+
+## Tooling Stage 00A — DSH Build Control
+
+Failure here kills or downgrades **DSH as a development treatment**, not Smokestack.
+
+### DSH-Q0 — install/runtime
+
+Reject the candidate DSH baseline if:
+- cold install requires source patching, hand-edited `node_modules`, global packages, or undocumented system state;
+- the profile depends on an ambient scratch `DSH_HOME`;
+- exact source/release/package identity cannot be recorded;
+- install/runtime writes outside qualification-owned state roots without an explicit prerequisite;
+- a no-model process cannot be reliably terminated/quiesced.
+
+### DSH-Q1 — subscription identity isolation
+
+Reject multi-identity subscription routing if:
+- Codex orchestrator/implementer cannot be bound to distinct explicit `CODEX_HOME` identities;
+- simultaneous identities overwrite or leak account/session state;
+- native product/package identities are conflated or inferred from PATH alone;
+- qualification requires `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to pass;
+- auth/session selection requires reading or persisting credential values;
+- the intended Claude subscription-mediated use is incompatible with current product/account policy.
+
+### DSH-Q2 — native Codex parent
+
+Kill `DSH_NATIVE_CODEX_PARENT` if:
+- integration relies on terminal text scraping instead of structured app-server/tool protocol;
+- dynamic tool calls/arguments/results cannot be observed mechanically;
+- parent can mutate the fixture directly despite read-only policy;
+- parent can invoke an unregistered/unbounded tool path;
+- call/turn ceilings exist only in the prompt;
+- timeout/cancellation cannot mechanically classify and quiesce the process;
+- identity/session binding is nondeterministic.
+
+Do not rescue this by switching to an API-key-funded parent under the same claim. That is a different architecture.
+
+### DSH-Q3 — implementer
+
+Kill the DSH write path if:
+- orchestrator writes directly;
+- worker writes outside the assigned fixture worktree;
+- a prompt can obtain a second implementation call beyond the hard ceiling;
+- tests are accepted solely from worker prose rather than controller/host observation;
+- changed-path evidence is incomplete or irreconcilable.
+
+### DSH-Q4 — reviewer
+
+Kill the independent-reviewer treatment if:
+- reviewer can write/edit/Bash or otherwise mutate the fixture;
+- reviewer can self-repair its own finding;
+- implementer hidden reasoning is required for review;
+- seeded severe defects are not detected enough to justify the role in comparative testing;
+- reviewer behavior is generic agreement/theater rather than materially independent error detection.
+
+### DSH-Q5 — bounded repair
+
+Reject the protocol if:
+- Medium/Low findings cause ordinary unbounded repair loops;
+- more than one repair or targeted rereview can occur;
+- ambiguous/failed child state can be classified PASS;
+- terminal state depends on agent prose rather than observed state;
+- an episode can recurse without a fixed terminal bound.
+
+### DSH-Q6 — comparative utility
+
+Do not make DSH the default Smokestack development path if it fails to provide a meaningful quality/reliability/governance benefit relative to simpler controls after accounting for latency and orchestration complexity.
+
+If DSH loses this test, keep Smokestack and use the simpler development protocol.
 
 ## Stage 1 — Source qualification
 
