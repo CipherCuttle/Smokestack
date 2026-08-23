@@ -10,17 +10,18 @@ The intended development protocol is:
 PLAN
   |
   v
-CODEX ORCHESTRATOR (subscription identity B, read-only)
+DEEPSEEK V4 FLASH PARENT
+(OpenRouter API; orchestration only)
   |
   v
 DSH GOVERNED DELEGATION
   |
-  +--> CODEX IMPLEMENTER (subscription identity A, bounded worktree write)
+  +--> CODEX IMPLEMENTER (native subscription auth, bounded worktree write)
   |          |
   |          v
   |     HOST-OBSERVED TESTS
   |
-  +--> CLAUDE REVIEWER (independent, mechanically read-only)
+  +--> CLAUDE REVIEWER (native subscription auth, independent, mechanically read-only)
              |
              +-- no Critical/High --> CLOSURE
              |
@@ -38,26 +39,28 @@ DSH GOVERNED DELEGATION
 
 Hard lifecycle limits for the first qualified protocol:
 
-- orchestrator planning rounds: <=2;
+- parent model requests: <=8 per episode;
 - implementation calls: <=1 before review;
 - hostile reviews: <=1;
 - repair calls: <=1 and only for Critical/High;
 - targeted rereviews: <=1 and only after Critical/High repair;
-- whole-episode automatic retries: 0.
+- whole-episode automatic retries: 0;
+- DSH parent-provider retries: 0 for qualification and first production protocol.
 
 Medium/Low findings do not create repair loops unless they invalidate the phase objective/evidence, violate a frozen invariant, or create a fail-closed/security risk.
 
-## What "no API keys" means
+## Authentication and spend boundary
 
-The target build-control configuration MUST NOT require:
+The build-control treatment intentionally uses **one API credential** for the parent only:
 
-- `OPENAI_API_KEY`;
-- `ANTHROPIC_API_KEY`;
-- a DeepSeek model API key.
+- `OPENROUTER_API_KEY` -> DSH parent route only;
+- `OPENAI_API_KEY` -> MUST be absent from Codex child configuration;
+- `ANTHROPIC_API_KEY` -> MUST be absent from Claude reviewer configuration;
+- no direct DeepSeek API key is required.
 
-Codex identities authenticate through native ChatGPT/Codex account state. Claude Code authenticates through native Claude account state when that use is compatible with the current product/account policy.
+Codex authenticates through native ChatGPT/Codex account state. Claude Code authenticates through native Claude account state when that use is compatible with current product/account policy.
 
-Authentication happens outside DSH. The harness/controller must not copy, print, hash, commit, serialize, or inspect credential values.
+The OpenRouter key is a parent-model transport secret, not a child coding-agent credential. It must be read only by the DSH parent-provider process/configuration seam and must never be copied into child `env` overlays, prompts, receipts, fixtures, logs, Git config, or repository files.
 
 This does **not** promise that future market-data/social-data sources are keyless. Birdeye, Helius, Kaito, or other data-source credentials are a separate PR-01 source-qualification question.
 
@@ -73,20 +76,69 @@ release:    0.1.1-rc.2
 
 This is only the **candidate baseline** until DSH-Q0 proves a cold, deterministic install. DSH is developer preview; upgrading the pin is an explicit tooling qualification event, not an ambient dependency update.
 
-Current upstream already provides first-class one-shot Codex and Claude Code subagent bundles. Smokestack should use those surfaces before writing any child-provider fork.
+Current upstream already provides:
+- a provider-neutral `llm-pi-ai` parent adapter that supports configured OpenAI-compatible gateways;
+- first-class one-shot Codex subagent bundles;
+- first-class one-shot Claude Code subagent bundles.
+
+Smokestack should use those upstream surfaces before writing any provider fork.
+
+## Parent model identity
+
+The first parent candidate is pinned to a dated model, not an alias:
+
+```text
+provider route: smokestack-openrouter
+transport:      OpenRouter OpenAI-compatible API
+model:          deepseek/deepseek-v4-flash-0731
+role:           orchestration/planning only
+```
+
+Do **not** use `~deepseek/deepseek-v4-flash-latest` in the qualified protocol because the alias can silently change model identity.
+
+A future parent upgrade is a tooling requalification event and must preserve the old receipt/model identity.
+
+### Candidate DSH parent route
+
+The qualification profile should begin from this shape rather than patching DSH source:
+
+```yaml
+- id: llm
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      smokestack-openrouter:
+        displayName: Smokestack OpenRouter
+        apiKeyEnv: OPENROUTER_API_KEY
+        api: openai-completions
+        baseURL: https://openrouter.ai/api/v1
+        compat:
+          thinkingFormat: openrouter
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        models:
+          - id: deepseek/deepseek-v4-flash-0731
+            name: DeepSeek V4 Flash 0731
+            contextWindow: 1310720
+            maxTokens: 8192
+```
+
+The exact compatibility fields are **candidate configuration** until DSH-Q1/Q2 exercises a real tool-calling turn against OpenRouter. Do not promote a guessed field merely because the YAML loads.
 
 ## Identity ontology
 
 Never repeat QntyLab's package/native-version conflation.
 
-An agent identity is a tuple, not a product name:
+An agent/model identity is a tuple, not a product name:
 
 ```text
 agent_id
 role
 provider/product
 DSH source/release identity
-product package identity (if applicable)
+parent provider route + exact model id (for parent)
+product package identity (for native children, if applicable)
 native executable/package-payload identity
 product version
 executable/entrypoint digest where observable
@@ -101,13 +153,13 @@ Package version and native product version are separate fields. Equality is neit
 
 ## Home/state layout
 
-DSH state and native agent account state are separate.
+DSH state and native child account state are separate.
 
 Conceptual local layout:
 
 ```text
 <tooling-state>/
-  dsh-home/                 # DSH profile/config only
+  dsh-home/                 # DSH profile/config only; no secret values committed
   episodes/
     <episode-id>/
       intent.json
@@ -115,61 +167,40 @@ Conceptual local layout:
       receipt.json
 
 <identity-state-outside-repo>/
-  codex-orchestrator/       # CODEX_HOME B
-  codex-implementer/        # CODEX_HOME A
+  codex-implementer/        # CODEX_HOME
   claude-reviewer/          # native Claude account/settings state
 ```
 
 Rules:
-- never commit product auth state;
+- never commit parent or child auth state;
 - never require an ambient scratch DSH_HOME;
-- do not share `CODEX_HOME` between orchestrator and implementer;
-- do not infer identity from PATH alone;
+- do not infer native child identity from PATH alone;
 - qualify using explicit home/workspace inputs;
-- agent home contents are not hashed wholesale because they can contain secrets/private state.
+- agent home contents are not hashed wholesale because they can contain secrets/private state;
+- `OPENROUTER_API_KEY` is referenced by environment variable name only and its value is never serialized.
 
 ## Parent strategy
 
-### Preferred: structured native Codex parent
+### Preferred: native DSH loop + OpenRouter DeepSeek V4 Flash
 
-Use the official Codex app-server protocol, not terminal scraping.
+Use DSH's normal provider-neutral LLM seam. Do not build a custom Codex-parent bridge unless the simpler route proves inadequate.
 
-The parent controller should:
+The parent is responsible only for orchestration:
+- read the frozen phase objective and acceptance contract;
+- inspect repository state through read-only tools where needed;
+- delegate one bounded implementation task;
+- request host-observed tests;
+- request one independent review;
+- route exactly one severe repair when allowed;
+- stop at the terminal state.
 
-1. spawn the exact qualified Codex wrapper/executable with orchestrator `CODEX_HOME`;
-2. perform the app-server `initialize` / `initialized` handshake;
-3. start an ephemeral read-only thread;
-4. register a tiny set of dynamic orchestration tools;
-5. submit the frozen phase objective/acceptance contract;
-6. observe every dynamic tool request and dispatch only legal state-machine transitions;
-7. stop at the terminal state and emit a harness/controller receipt.
+The parent must not receive direct repository write/edit authority. Generic shell/network capability should not be exposed merely because DSH can expose it.
 
-Initial dynamic tools should be semantic, not generic shell escape hatches:
+### Why this is now preferred
 
-```text
-delegate_implementation
-run_required_tests
-request_hostile_review
-delegate_severe_repair
-run_targeted_rereview
-close_phase
-```
+This uses an upstream-supported DSH LLM adapter instead of creating the most fragile part of the previous QntyLab experiment: a custom/native parent integration. OpenRouter V4 Flash supports tool calling, and the exact model can be pinned. The parent is cheap enough that we do not need to contort the architecture around zero parent spend.
 
-The parent must not receive a generic repository write/edit tool from the control layer. Its native sandbox is read-only and network-denied except what the authenticated model product itself requires.
-
-### Why this is preferable to a DSH API parent
-
-Current DSH has a provider-neutral LLM seam but no first-class native-Codex parent adapter in the inspected release. Using `llm-pi-ai`/OpenAI API for the parent would reintroduce an API key and defeat the subscription-native objective.
-
-### Fallback
-
-If structured native parent qualification fails, do **not** implement terminal scraping or relax write authority.
-
-Fallback choices:
-- use Codex manually/external to the controller for planning while keeping DSH children bounded; or
-- build Smokestack with the ordinary single-agent/manual PR protocol.
-
-The stronger `DSH_NATIVE_CODEX_PARENT` claim dies if Q2 fails.
+The thesis principle we keep is **role separation and external enforcement**, not “every model must be subscription-authenticated.”
 
 ## Child strategy
 
@@ -181,6 +212,7 @@ Required behavior:
 - explicit implementer `CODEX_HOME`;
 - native subscription login pre-exists;
 - no `OPENAI_API_KEY` overlay;
+- no `OPENROUTER_API_KEY` overlay;
 - exact parent Session worktree cwd;
 - one fresh child turn;
 - bounded workspace-write policy;
@@ -193,12 +225,13 @@ Use upstream `@deepseek-ai/dsh-subagent-claude-code` first if subscription-auth 
 Required behavior:
 - independent reviewer account/session state;
 - no `ANTHROPIC_API_KEY` overlay;
+- no `OPENROUTER_API_KEY` overlay;
 - read-only repository surface;
 - no Bash/write/edit/agent-spawn/MCP mutation surface;
 - receives candidate diff/artifact + acceptance contract, not the implementer's hidden reasoning;
 - cannot repair findings.
 
-If current Anthropic account/product policy does not support DSH-mediated subscription use safely, the Claude-via-DSH leg is `NOT_QUALIFIED`; do not silently add an API key. A manual native Claude Code review may be evaluated separately, but it is not the same treatment.
+If current Anthropic account/product policy does not support DSH-mediated subscription use safely, the Claude-via-DSH leg is `NOT_QUALIFIED`; do not silently add an Anthropic API key. A manual native Claude Code review may be evaluated separately, but it is not the same treatment.
 
 ## DSH qualification ladder
 
@@ -215,65 +248,71 @@ Prove:
 - no source checkout patching;
 - no ambient scratch DSH_HOME dependency;
 - profile composition is deterministic;
-- only expected files are written under the qualification-owned state roots;
+- only expected files are written under qualification-owned state roots;
 - process tree quiesces after a no-model probe.
 
 KILL DSH baseline if a clean install requires hand-edited node_modules, source patches, implicit global packages, or an undocumented host DSH_HOME.
 
-### DSH-Q1 — Subscription identity isolation / zero-model probes
+### DSH-Q1 — Parent route + native child identity qualification
 
-No model-backed task yet.
+Use qualification fixtures only.
 
-Codex A and B:
-- distinct `CODEX_HOME`;
-- both native account sessions already authenticated;
-- both can launch concurrently;
-- app-server initialize/thread-start compatibility proven without a task/model turn where possible;
-- identity fingerprints do not collide;
-- zero API-key environment requirement.
+Parent:
+- `OPENROUTER_API_KEY` exists only at the configured parent route boundary;
+- exact provider route and model id are recorded;
+- exact dated model `deepseek/deepseek-v4-flash-0731` resolves;
+- provider retries are zero;
+- the secret value never appears in logs/receipts/child environments.
+
+Codex:
+- explicit `CODEX_HOME`;
+- native account session already authenticated;
+- package/native executable identities recorded separately;
+- zero `OPENAI_API_KEY` requirement.
 
 Claude:
 - native CLI/SDK startup compatibility;
 - subscription-auth state identified without credential reads;
-- no `ANTHROPIC_API_KEY` present;
-- current policy/billing path is acceptable for the intended local development use.
+- zero `ANTHROPIC_API_KEY` requirement;
+- current policy/billing path acceptable for intended local development use.
 
-KILL multi-identity subscription routing if homes collide, authentication state leaks, or either required actor cannot be deterministically selected.
+KILL the proposed route if credentials leak across roles, exact model identity cannot be bound, or either native child cannot be deterministically selected.
 
-### DSH-Q2 — Native Codex parent spike
+### DSH-Q2 — Parent tool-loop qualification
 
-Disposable fixture only.
+Disposable fixture only; no Smokestack mutation.
 
-Prove:
-- structured app-server JSON-RPC, never terminal scraping;
-- parent is read-only;
-- dynamic tool schemas arrive intact;
-- a dynamic tool request is observed and can be answered by the controller;
+Prove with a tiny harmless tool surface:
+- real OpenRouter DeepSeek parent request succeeds;
+- tool schema reaches the model;
+- at least one expected tool call is emitted and parsed structurally;
 - tool name/arguments/result are machine-observable;
-- parent call/turn ceiling is external to the model prompt;
-- timeout/cancellation quiesces process tree;
-- every parent action receives an episode/turn identity;
+- malformed or unknown tool requests fail closed;
+- parent request ceiling is external to the prompt;
+- zero automatic provider retries;
+- timeout/cancellation quiesces the episode;
 - no repository mutation occurs.
 
-KILL native-parent path if tool dispatch is not structured/reliable, direct writes escape the sandbox, identity cannot be bound, or termination cannot be mechanically classified.
+KILL this parent route if tool dispatch is unreliable, tool semantics are silently altered, usage cannot be bounded, or termination cannot be mechanically classified.
 
 ### DSH-Q3 — One implementer
 
 Fixture topology:
 
 ```text
-Codex Parent -> governed `delegate_implementation` -> DSH Codex Worker
+DeepSeek V4 Flash Parent -> governed subagent tool -> DSH Codex Worker
 ```
 
 Prove:
 - exactly one worker call;
 - worker can change only fixture worktree;
-- orchestrator remains byte-for-byte unable to write;
+- parent has no direct write route;
 - tests are run/observed by controller/host rather than trusted from worker prose;
 - changed paths/diff/test exit are recorded;
-- no second worker call can be obtained by prompt tricks.
+- no second worker call can be obtained by prompt tricks;
+- parent key never reaches the worker environment.
 
-KILL DSH write path if scope containment or call ceiling is bypassable.
+KILL DSH write path if scope containment, credential isolation, or call ceiling is bypassable.
 
 ### DSH-Q4 — Independent reviewer
 
@@ -284,6 +323,7 @@ Prove with negative controls:
 - seeded request to repair is denied/fails;
 - exactly one review call;
 - reviewer sees acceptance contract + artifact, not implementer chain-of-thought;
+- parent and implementer credentials do not reach reviewer;
 - seeded Critical/High defects are detectable often enough to justify the role in later comparative evaluation.
 
 KILL reviewer treatment if it is not mechanically read-only or is merely generic review theater.
@@ -310,8 +350,9 @@ IMPLEMENT -> TEST -> REVIEW
 
 Prove:
 - Medium/Low cannot trigger normal repair loop;
-- second repair/re-review is rejected mechanically;
+- second repair/rereview is rejected mechanically;
 - failed/ambiguous child process cannot be treated as success;
+- parent cannot extend its own request budget;
 - final state is deterministic and finite.
 
 ### DSH-Q6 — Comparative utility
@@ -320,7 +361,7 @@ Before making DSH the default Smokestack build path, compare on unseen disposabl
 
 A. Codex alone;
 B. Codex + prompt-only/manual review workflow;
-C. DSH-enforced Codex orchestrator -> Codex implementer -> Claude reviewer.
+C. DSH DeepSeek V4 Flash parent -> Codex implementer -> Claude reviewer.
 
 Measure at minimum:
 - task/hidden-test success;
@@ -329,9 +370,9 @@ Measure at minimum:
 - protocol violations;
 - unauthorized writes;
 - wall-clock time;
-- agent calls/repair frequency;
-- unnecessary diff size;
-- subscription usage where observable.
+- parent token usage/cost;
+- child calls/repair frequency;
+- unnecessary diff size.
 
 `DSH_BUILD_CONTROL_QUALIFIED` requires a meaningful reliability/quality advantage or a sufficiently valuable governance advantage to justify the orchestration tax.
 
@@ -342,9 +383,11 @@ If it does not, do not make DSH mandatory for Smokestack development.
 ### Keep
 
 - exact DSH/source identity;
-- provider/native executable identities as separate facts;
-- zero-model compatibility probes before paid/model-backed work;
-- hard call ceilings outside prompts;
+- exact parent provider/model identity;
+- provider/package/native executable identities as separate facts;
+- zero-model/native compatibility probes before child work;
+- hard request/call ceilings outside prompts;
+- parent secret isolation from children;
 - reviewer read-only enforcement;
 - external observation of test exit state;
 - safe diagnostics and credential redaction;
@@ -354,8 +397,9 @@ If it does not, do not make DSH mandatory for Smokestack development.
 
 ### Explicitly do not carry into V0
 
-- OpenAI API-funded DSH parent;
-- real-provider secret gate;
+- OpenAI API-funded parent specifically;
+- custom/native Codex parent bridge;
+- two separate Codex identities just to make the parent keyless;
 - remote Git episode claim refs;
 - remote create-only claim transport;
 - `BLOCK_NEVER_REPLAY` network-claim machinery;
@@ -376,11 +420,15 @@ Minimum receipt:
   "episode_id": "...",
   "protocol_version": "...",
   "dsh_identity": {},
-  "parent_identity": {},
+  "parent_identity": {
+    "provider": "smokestack-openrouter",
+    "model": "deepseek/deepseek-v4-flash-0731"
+  },
   "implementer_identity": {},
   "reviewer_identity": {},
   "workspace_identity": {},
   "call_counts": {},
+  "parent_usage": {},
   "changed_paths": [],
   "tests": { "observed_exit_code": 0 },
   "review": { "critical": 0, "high": 0 },
@@ -393,6 +441,7 @@ Minimum receipt:
 The controller/harness generates the receipt from observed events. Agents do not author their own success receipt.
 
 Do not persist:
+- OpenRouter key values;
 - OAuth tokens;
 - API keys;
 - credential helper output;
@@ -405,11 +454,11 @@ Do not persist:
 After `DSH_BUILD_CONTROL_QUALIFIED` only:
 
 ```text
-ORCHESTRATOR
+DEEPSEEK V4 FLASH PARENT
   plan from active phase contract
        |
        v
-IMPLEMENTER
+CODEX IMPLEMENTER
   smallest safe diff
        |
        v
@@ -423,4 +472,4 @@ CLAUDE HOSTILE REVIEW
        +-- C/H -> one repair -> retest -> one rereview -> CLOSURE
 ```
 
-The active Smokestack phase contract always wins over agent suggestions. DSH cannot authorize a downstream product stage merely because an agent proposes it.
+The active Smokestack phase contract always wins over agent suggestions. DSH cannot authorize a downstream product stage merely because the parent proposes it.
