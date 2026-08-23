@@ -7,7 +7,8 @@
     "node": "24.19.0"
   },
   "scripts": {
-    "dsh": "dsh"
+    "dsh": "dsh",
+    "q6": "node ./q6-runner.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",
