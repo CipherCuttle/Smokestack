@@ -8,16 +8,32 @@ A temporary workaround is not a PASS condition. Either remove it before stage cl
 
 ## Promotion boundary
 
-`experiments/` is disposable qualification code.
+`experiments/` is disposable product/source qualification code.
 `research/` records calibration/evaluation artifacts.
-`src/` is promoted runtime code.
+`src/` is promoted application runtime code.
+`tooling/` is development infrastructure and is outside the application dependency graph.
 
-Production code may not import experiment/research code. A useful experiment is rewritten/ported through an explicit promotion PR with fixtures/parity tests where applicable.
+Production code may not import experiment/research/tooling code. A useful experiment is rewritten/ported through an explicit promotion PR with fixtures/parity tests where applicable.
+
+## Agent tooling boundary
+
+DeepSeek Harness may be used only after the qualification ladder in `docs/DSH_BUILD_CONTROL.md` closes `DSH_BUILD_CONTROL_QUALIFIED`.
+
+Before that verdict:
+- no DSH model-backed run may mutate Smokestack;
+- no DSH package belongs in the root application dependency set;
+- no coding-agent API key may be introduced to rescue qualification;
+- qualification uses disposable fixture repositories/worktrees;
+- failure of DSH qualification leaves manual/single-agent development available.
+
+After qualification, DSH remains a build controller. The active phase contract, Git state, deterministic tests, and this constitution outrank agent suggestions.
+
+An agent may not self-authorize downstream work, skip required review, expand scope, or declare its own unobserved tests successful.
 
 ## Complexity budget
 
-Before PR-09, prohibited without a new ADR backed by measured need:
-- second runtime language;
+Before PR-09, prohibited in the application without a new ADR backed by measured need:
+- second application runtime language;
 - microservices;
 - Redis;
 - Kafka/RabbitMQ;
@@ -26,6 +42,8 @@ Before PR-09, prohibited without a new ADR backed by measured need:
 - ML framework;
 - web framework;
 - LLM provider SDK in the detector path.
+
+Qualified development tooling under `tooling/` does not count as an application runtime language/service, but it must remain independently removable and must not change the clean application bootstrap.
 
 ## TypeScript baseline
 
@@ -39,7 +57,9 @@ Unless a PR explicitly fails closure, promoted code must not contain unresolved 
 
 ## Dependency rule
 
-Every direct dependency must be listed in `docs/DEPENDENCIES.md` with purpose and removal criteria. Prefer platform/runtime primitives until a third-party package clearly lowers total risk.
+Every direct application dependency must be listed in `docs/DEPENDENCIES.md` with purpose and removal criteria. Prefer platform/runtime primitives until a third-party package clearly lowers total risk.
+
+Tooling dependencies get a separate manifest/lock under their tooling boundary; they do not silently enter the root application dependency graph.
 
 ## PR completion protocol
 
@@ -49,10 +69,12 @@ For every implementation phase:
 
 Medium/Low do not restart a phase unless they invalidate the phase objective/evidence, violate a frozen invariant, or create a fail-closed/security risk.
 
+When qualified DSH is used, those limits are mechanically enforced by the build protocol rather than left only in the prompts.
+
 ## Change size
 
 Prefer one semantic concern per PR. Contracts and migrations precede consumers. Backward-incompatible changes require an explicit migration/version plan.
 
 ## ADR rule
 
-Create an ADR for decisions expensive to reverse: a new runtime language/service, database/storage class, provider semantic substitution, time semantics, detector scientific contract, public receipt format, or execution/custody capability.
+Create an ADR for decisions expensive to reverse: a new application runtime language/service, database/storage class, provider semantic substitution, time semantics, detector scientific contract, public receipt format, execution/custody capability, or a material change to the DSH build-control trust/permission model.
