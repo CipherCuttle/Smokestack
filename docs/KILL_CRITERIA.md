@@ -24,37 +24,40 @@ Reject the candidate DSH baseline if:
 - install/runtime writes outside qualification-owned state roots without an explicit prerequisite;
 - a no-model process cannot be reliably terminated/quiesced.
 
-### DSH-Q1 — subscription identity isolation
+### DSH-Q1 — parent route + native child identities
 
-Reject multi-identity subscription routing if:
-- Codex orchestrator/implementer cannot be bound to distinct explicit `CODEX_HOME` identities;
-- simultaneous identities overwrite or leak account/session state;
+Reject the proposed routing if:
+- exact OpenRouter route/model identity cannot be bound to `deepseek/deepseek-v4-flash-0731`;
+- the parent credential leaks into a child environment, prompt, fixture, receipt, Git diff or retained diagnostic;
 - native product/package identities are conflated or inferred from PATH alone;
-- qualification requires `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to pass;
-- auth/session selection requires reading or persisting credential values;
+- Codex child qualification requires `OPENAI_API_KEY`;
+- Claude reviewer qualification requires `ANTHROPIC_API_KEY`;
+- native auth/session selection requires reading or persisting credential values;
 - the intended Claude subscription-mediated use is incompatible with current product/account policy.
 
-### DSH-Q2 — native Codex parent
+### DSH-Q2 — DeepSeek parent tool loop
 
-Kill `DSH_NATIVE_CODEX_PARENT` if:
-- integration relies on terminal text scraping instead of structured app-server/tool protocol;
-- dynamic tool calls/arguments/results cannot be observed mechanically;
-- parent can mutate the fixture directly despite read-only policy;
+Kill the proposed parent route if:
+- real OpenRouter tool calls cannot be observed structurally;
+- tool arguments/results are silently altered or cannot be reconciled;
+- parent can mutate the fixture directly despite the no-write route;
 - parent can invoke an unregistered/unbounded tool path;
-- call/turn ceilings exist only in the prompt;
-- timeout/cancellation cannot mechanically classify and quiesce the process;
-- identity/session binding is nondeterministic.
+- request ceilings exist only in the prompt;
+- provider retries cannot be fixed to zero for the first protocol;
+- timeout/cancellation cannot mechanically classify and quiesce the episode;
+- exact model identity or usage cannot be recorded without exposing credentials.
 
-Do not rescue this by switching to an API-key-funded parent under the same claim. That is a different architecture.
+Do not rescue this by switching to a floating model alias or by widening the parent tool surface under the same qualification.
 
 ### DSH-Q3 — implementer
 
 Kill the DSH write path if:
-- orchestrator writes directly;
+- parent writes directly;
 - worker writes outside the assigned fixture worktree;
 - a prompt can obtain a second implementation call beyond the hard ceiling;
 - tests are accepted solely from worker prose rather than controller/host observation;
-- changed-path evidence is incomplete or irreconcilable.
+- changed-path evidence is incomplete or irreconcilable;
+- parent credentials reach the worker.
 
 ### DSH-Q4 — reviewer
 
@@ -62,6 +65,7 @@ Kill the independent-reviewer treatment if:
 - reviewer can write/edit/Bash or otherwise mutate the fixture;
 - reviewer can self-repair its own finding;
 - implementer hidden reasoning is required for review;
+- parent/implementer credentials reach the reviewer;
 - seeded severe defects are not detected enough to justify the role in comparative testing;
 - reviewer behavior is generic agreement/theater rather than materially independent error detection.
 
@@ -72,11 +76,12 @@ Reject the protocol if:
 - more than one repair or targeted rereview can occur;
 - ambiguous/failed child state can be classified PASS;
 - terminal state depends on agent prose rather than observed state;
+- parent can extend its own request budget;
 - an episode can recurse without a fixed terminal bound.
 
 ### DSH-Q6 — comparative utility
 
-Do not make DSH the default Smokestack development path if it fails to provide a meaningful quality/reliability/governance benefit relative to simpler controls after accounting for latency and orchestration complexity.
+Do not make DSH the default Smokestack development path if it fails to provide a meaningful quality/reliability/governance benefit relative to simpler controls after accounting for latency, parent API cost, and orchestration complexity.
 
 If DSH loses this test, keep Smokestack and use the simpler development protocol.
 
