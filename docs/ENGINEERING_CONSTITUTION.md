@@ -22,7 +22,8 @@ DeepSeek Harness may be used only after the qualification ladder in `docs/DSH_BU
 Before that verdict:
 - no DSH model-backed run may mutate Smokestack;
 - no DSH package belongs in the root application dependency set;
-- no coding-agent API key may be introduced to rescue qualification;
+- `OPENROUTER_API_KEY` is the only model API credential authorized for the DSH parent qualification route;
+- OpenAI/Anthropic API keys may not be introduced to rescue native child qualification;
 - qualification uses disposable fixture repositories/worktrees;
 - failure of DSH qualification leaves manual/single-agent development available.
 
