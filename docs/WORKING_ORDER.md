@@ -1,12 +1,37 @@
 # Chronological Working Order
 
-No stage may begin until the prior stage has a terminal `ADVANCE` or an explicitly documented `PIVOT` that redefines the downstream North Star. `KILL` stops that branch of the product.
+No product stage may begin until the prior product stage has a terminal `ADVANCE` or an explicitly documented `PIVOT` that redefines the downstream North Star. `KILL` stops that branch of the product.
+
+Development tooling has a separate rule: failure of DSH qualification kills the DSH build-control treatment, **not Smokestack**. Manual/single-agent development remains valid.
 
 ## PR-00 — Constitution
 
 Build only the repo foundation, pinned toolchain, minimal CLI, CI, documentation, policies, ADRs, and fail-closed status.
 
 Exit: `FOUNDATION_PASS`.
+
+## PR-00A — DSH Build-Control Qualification (tooling, optional for the product; mandatory before DSH may author Smokestack changes)
+
+This phase exists only because Smokestack intends to use DeepSeek Harness as a development control plane. It is not a product/scientific prerequisite and must remain under `tooling/dsh/` plus disposable fixtures.
+
+Run the ordered qualification ladder in `docs/DSH_BUILD_CONTROL.md`:
+
+1. `DSH-Q0` cold install/runtime closure;
+2. `DSH-Q1` subscription identity isolation + zero-model compatibility;
+3. `DSH-Q2` structured native Codex parent spike;
+4. `DSH-Q3` one bounded Codex implementer;
+5. `DSH-Q4` mechanically read-only Claude reviewer;
+6. `DSH-Q5` one severe-repair/rereview cycle;
+7. `DSH-Q6` comparative utility against simpler controls.
+
+No DSH model-backed qualification run may target Smokestack itself before Q5 closes mechanically correct; comparative evaluation uses unseen disposable engineering fixtures. DSH becomes the default build path only after Q6 establishes enough quality/reliability/governance value to justify its orchestration tax.
+
+No coding-model API keys are introduced to rescue qualification.
+
+Exit:
+- `DSH_BUILD_CONTROL_QUALIFIED`: DSH may be used for later Smokestack implementation PRs under the frozen protocol;
+- `DSH_BUILD_CONTROL_REJECTED`: continue Smokestack without mandatory DSH;
+- `BLOCKED`: fix only the failing tooling prerequisite under the same bounded phase if its repair is already authorized; otherwise stop and redesign.
 
 ## PR-01 — Source Qualification Harness
 
