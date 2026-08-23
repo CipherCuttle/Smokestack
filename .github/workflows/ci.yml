@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e3f52ebd80c4df62752b # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Check
+        run: npm run check
+
+      - name: Foundation fail-closed status
+        run: |
+          npm run smokestack -- status | tee /tmp/status.json
+          grep -q '"liveProvidersAuthorized": false' /tmp/status.json
+          grep -q '"detectorAuthorized": false' /tmp/status.json
+          grep -q '"publicAlertsAuthorized": false' /tmp/status.json
+          grep -q '"tradingAuthorized": false' /tmp/status.json
