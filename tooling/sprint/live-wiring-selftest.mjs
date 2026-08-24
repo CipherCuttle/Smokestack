@@ -1,9 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { writeDshPatches, parseReviewGate, parseResearchReceipt } from './dsh-runtime.mjs';
+import { changedPaths, isAuthorizedPath, reconcileNonPassWorktree } from './live-sprint.mjs';
+
+function runGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if ((result.status ?? 125) !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+function createReconciliationRepo() {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-reconciliation-'));
+  runGit(cwd, ['init', '-q']);
+  runGit(cwd, ['config', 'user.email', 'smokestack-test@example.invalid']);
+  runGit(cwd, ['config', 'user.name', 'Smokestack Test']);
+  fs.mkdirSync(path.join(cwd, 'experiments/qualification'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, 'outside'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 'baseline\n');
+  fs.writeFileSync(path.join(cwd, 'outside/preserved.txt'), 'baseline\n');
+  runGit(cwd, ['add', '.']);
+  runGit(cwd, ['commit', '-qm', 'baseline']);
+  return cwd;
+}
 
 test('role patches isolate research, implement, and review capabilities', () => {
   const root = '/tmp/smokestack-sprint-wiring-selftest';
@@ -35,6 +57,54 @@ test('gate parsers fail closed on ambiguity', () => {
   assert.equal(good.evidence.sources.length, 2);
   assert.equal(parseResearchReceipt('RESEARCH_GATE: PASS').evidence, null);
   assert.equal(parseResearchReceipt('RESEARCH_GATE: PASS\nRESEARCH_GATE: BLOCKED').gate, 'AMBIGUOUS');
+});
+
+test('authority matcher supports exact files and recursive dir/** only', () => {
+  assert.equal(isAuthorizedPath('src/exact.js', ['src/exact.js']), true);
+  assert.equal(isAuthorizedPath('experiments/qualification/a/b.json', ['experiments/qualification/**']), true);
+  assert.equal(isAuthorizedPath('experiments/qualification', ['experiments/qualification/**']), true);
+  assert.equal(isAuthorizedPath('experiments/qualification-evil/a.json', ['experiments/qualification/**']), false);
+  assert.equal(isAuthorizedPath('experiments/other/a.json', ['experiments/*/a.json']), false);
+  assert.equal(isAuthorizedPath('../outside.txt', ['../**']), false);
+});
+
+test('authorized non-PASS rollback restores tracked/staged changes to checkpoint and proves clean', () => {
+  const cwd = createReconciliationRepo();
+  try {
+    const checkpointHead = runGit(cwd, ['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 'changed\n');
+    fs.writeFileSync(path.join(cwd, 'experiments/qualification/new.txt'), 'new\n');
+    runGit(cwd, ['add', 'experiments/qualification/new.txt']);
+
+    const result = reconcileNonPassWorktree(cwd, ['experiments/qualification/**'], checkpointHead);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.authority_violation, false);
+    assert.equal(fs.readFileSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 'utf8'), 'baseline\n');
+    assert.equal(fs.existsSync(path.join(cwd, 'experiments/qualification/new.txt')), false);
+    assert.deepEqual(changedPaths(cwd), []);
+    assert.equal(runGit(cwd, ['rev-parse', 'HEAD']), checkpointHead);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('any unauthorized mutation is preserved and blocks authorized rollback', () => {
+  const cwd = createReconciliationRepo();
+  try {
+    const checkpointHead = runGit(cwd, ['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 'authorized dirty\n');
+    fs.writeFileSync(path.join(cwd, 'outside/preserved.txt'), 'unauthorized dirty\n');
+
+    const result = reconcileNonPassWorktree(cwd, ['experiments/qualification/**'], checkpointHead);
+    assert.equal(result.ok, false);
+    assert.equal(result.authority_violation, true);
+    assert.deepEqual(result.before.unauthorized, ['outside/preserved.txt']);
+    assert.equal(fs.readFileSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 'utf8'), 'authorized dirty\n');
+    assert.equal(fs.readFileSync(path.join(cwd, 'outside/preserved.txt'), 'utf8'), 'unauthorized dirty\n');
+    assert.deepEqual(changedPaths(cwd), ['experiments/qualification/tracked.txt', 'outside/preserved.txt']);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test('qualification MCP fixture is deterministic and read-only', async () => {
