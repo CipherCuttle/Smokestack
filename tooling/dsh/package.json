@@ -9,7 +9,8 @@
   "scripts": {
     "dsh": "dsh",
     "q6": "node ./q6-entry.mjs",
-    "q6:forensics": "node ./q6-scope-forensics.mjs"
+    "q6:forensics": "node ./q6-scope-forensics.mjs",
+    "q6:reconcile": "node ./q6-r1-scope-reconcile.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",
