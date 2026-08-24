@@ -72,13 +72,17 @@ Research cannot borrow lifecycle budget and the parent cannot enlarge either cei
 
 ## Git / checkpoint authority
 
-V0 allows one writer at a time. A task begins from a clean Git state.
+V0 allows one writer at a time. Every task begins from a clean Git state, and the host re-checks that boundary before selecting the next READY node.
 
-After a task reaches PASS the host confirms only `authority.write` paths changed, stages only those paths, re-checks the staged set, creates `sprint: <task-id>` checkpoint commit, then advances the DAG. A model never creates the success checkpoint. Unauthorized writes fail closed.
+`authority.write` is a host contract, not a Git pathspec. Each entry must be either an exact repo-relative path such as `src/foo.ts` or one recursive directory authority ending in `/**`, such as `experiments/qualification/**`. Other wildcard syntax is invalid and fails closed before model execution.
+
+After a task reaches PASS the host confirms only `authority.write` paths changed, stages only the exact observed changed paths, re-checks the staged set against the same authority matcher, creates `sprint: <task-id>` checkpoint commit, then advances the DAG. A model never creates the success checkpoint.
+
+After a task reaches a non-PASS terminal state, the host reconciles against the checkpoint HEAD captured before that task. If and only if every dirty path is authorized, the host may restore the task's tracked/staged paths to that checkpoint and remove only exact authorized untracked paths, then prove the worktree clean before another independent READY node runs. If any dirty path is unauthorized, the host cleans nothing, records the exact paths, hard-stops the controller, and leaves the mutations inspectable. Global reset/clean is not part of this path.
 
 ## Human escalation
 
-The controller does not autonomously authorize frozen scientific-semantic changes, weakened acceptance, new credential domains, spend/time expansion, publication, protected-branch merge, destructive non-disposable operations, or unresolved canonical source conflicts. Independent READY work may continue until the executable frontier is exhausted.
+The controller does not autonomously authorize frozen scientific-semantic changes, weakened acceptance, new credential domains, spend/time expansion, publication, protected-branch merge, destructive non-disposable operations, or unresolved canonical source conflicts. Independent READY work may continue until the executable frontier is exhausted, but only across clean checkpoint boundaries.
 
 ## PR-00B live qualification
 
@@ -91,7 +95,7 @@ The disposable live sprint has four dependent tasks:
 
 PASS requires zero human intervention, all four tasks PASS, actual MCP initialize/list/call compatibility, read-only research, host tests, unambiguous TEN_STACK gates, zero unauthorized writes, bounded repair/rereview if triggered, four host checkpoint commits, a clean final worktree, and a deterministic final receipt.
 
-GitHub Actions runs only zero-model syntax/control tests. Native Codex/Claude subscription authentication and OpenRouter model spend are exercised only by the local live qualification.
+GitHub Actions runs zero-model syntax/control tests, including authority matching and non-PASS repository reconciliation. Native Codex/Claude subscription authentication and OpenRouter model spend are exercised only by the local live qualification.
 
 Run:
 
