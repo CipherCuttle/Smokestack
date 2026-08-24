@@ -43,21 +43,176 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function changedPaths(cwd) {
-  const tracked = runSync('git', ['diff', '--name-only', '--no-ext-diff', 'HEAD', '--'], { cwd });
+function splitNul(text) {
+  return text.split('\0').filter(Boolean);
+}
+
+function normalizeRepoPath(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\0') || value.includes('\\')) return null;
+  if (path.posix.isAbsolute(value) || path.posix.normalize(value) !== value) return null;
+  const parts = value.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) return null;
+  return value;
+}
+
+function parseAuthorityPattern(pattern) {
+  const normalized = normalizeRepoPath(pattern);
+  if (!normalized) return null;
+  if (normalized.endsWith('/**')) {
+    const prefix = normalized.slice(0, -3);
+    if (!prefix || prefix.includes('*')) return null;
+    return { kind: 'recursive', value: prefix };
+  }
+  if (normalized.includes('*')) return null;
+  return { kind: 'exact', value: normalized };
+}
+
+export function isAuthorizedPath(repoPath, allowed) {
+  const normalizedPath = normalizeRepoPath(repoPath);
+  if (!normalizedPath || !Array.isArray(allowed)) return false;
+  return allowed.some((rawPattern) => {
+    const pattern = parseAuthorityPattern(rawPattern);
+    if (!pattern) return false;
+    if (pattern.kind === 'exact') return normalizedPath === pattern.value;
+    return normalizedPath === pattern.value || normalizedPath.startsWith(`${pattern.value}/`);
+  });
+}
+
+export function changedPaths(cwd) {
+  const tracked = runSync('git', ['diff', '--name-only', '-z', '--no-ext-diff', '--no-renames', 'HEAD', '--'], { cwd });
   if (tracked.exit !== 0) return ['<git-diff-error>'];
-  const untracked = runSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd });
+  const untracked = runSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd });
   if (untracked.exit !== 0) return ['<git-ls-files-error>'];
   return [...new Set([
-    ...tracked.stdout.split('\n').filter(Boolean),
-    ...untracked.stdout.split('\n').filter(Boolean),
+    ...splitNul(tracked.stdout),
+    ...splitNul(untracked.stdout),
   ])].sort();
 }
 
-function scopeCheck(cwd, allowed) {
+export function scopeCheck(cwd, allowed) {
   const paths = changedPaths(cwd);
-  const unauthorized = paths.filter((p) => !allowed.includes(p));
-  return { paths, unauthorized, ok: unauthorized.length === 0 };
+  const invalid_patterns = (Array.isArray(allowed) ? allowed : []).filter((pattern) => parseAuthorityPattern(pattern) === null);
+  const unauthorized = paths.filter((p) => !isAuthorizedPath(p, allowed));
+  return {
+    paths,
+    unauthorized,
+    invalid_patterns,
+    ok: invalid_patterns.length === 0 && unauthorized.length === 0,
+  };
+}
+
+function resolveHead(cwd) {
+  const head = runSync('git', ['rev-parse', 'HEAD'], { cwd });
+  if (head.exit !== 0 || !head.stdout.trim()) throw new Error(`cannot resolve checkpoint HEAD: ${head.stderr || head.stdout}`);
+  return head.stdout.trim();
+}
+
+function literalTrackedPaths(cwd, checkpointHead, paths) {
+  if (paths.length === 0) return { ok: true, paths: [] };
+  const atHead = runSync('git', ['--literal-pathspecs', 'ls-tree', '-r', '-z', '--name-only', checkpointHead, '--', ...paths], { cwd });
+  if (atHead.exit !== 0) return { ok: false, error: `git ls-tree failed: ${atHead.stderr}` };
+  const inIndex = runSync('git', ['--literal-pathspecs', 'ls-files', '-z', '--', ...paths], { cwd });
+  if (inIndex.exit !== 0) return { ok: false, error: `git ls-files failed: ${inIndex.stderr}` };
+  return { ok: true, paths: [...new Set([...splitNul(atHead.stdout), ...splitNul(inIndex.stdout)])].sort() };
+}
+
+export function reconcileNonPassWorktree(cwd, allowed, checkpointHead) {
+  const before = scopeCheck(cwd, allowed);
+  if (!before.ok) {
+    return {
+      ok: false,
+      authority_violation: before.unauthorized.length > 0,
+      rollback_failed: false,
+      checkpoint_head: checkpointHead,
+      before,
+      after: before,
+      rolled_back: [],
+      removed_untracked: [],
+    };
+  }
+  if (before.paths.length === 0) {
+    return {
+      ok: true,
+      authority_violation: false,
+      rollback_failed: false,
+      checkpoint_head: checkpointHead,
+      before,
+      after: before,
+      rolled_back: [],
+      removed_untracked: [],
+    };
+  }
+
+  const tracked = literalTrackedPaths(cwd, checkpointHead, before.paths);
+  if (!tracked.ok) {
+    return {
+      ok: false,
+      authority_violation: false,
+      rollback_failed: true,
+      rollback_error: tracked.error,
+      checkpoint_head: checkpointHead,
+      before,
+      after: scopeCheck(cwd, allowed),
+      rolled_back: [],
+      removed_untracked: [],
+    };
+  }
+
+  const trackedSet = new Set(tracked.paths);
+  const untracked = before.paths.filter((p) => !trackedSet.has(p));
+  const rolledBack = [];
+  const removedUntracked = [];
+
+  try {
+    if (tracked.paths.length > 0) {
+      const restore = runSync('git', [
+        '--literal-pathspecs',
+        'restore',
+        `--source=${checkpointHead}`,
+        '--staged',
+        '--worktree',
+        '--',
+        ...tracked.paths,
+      ], { cwd });
+      if (restore.exit !== 0) throw new Error(`git restore failed: ${restore.stderr}`);
+      rolledBack.push(...tracked.paths);
+    }
+
+    const root = path.resolve(cwd);
+    for (const repoPath of untracked) {
+      const normalized = normalizeRepoPath(repoPath);
+      if (!normalized) throw new Error(`unsafe untracked path: ${repoPath}`);
+      const target = path.resolve(root, normalized);
+      if (target === root || !target.startsWith(`${root}${path.sep}`)) throw new Error(`untracked path escapes workdir: ${repoPath}`);
+      fs.rmSync(target, { force: true });
+      removedUntracked.push(repoPath);
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      authority_violation: false,
+      rollback_failed: true,
+      rollback_error: err.message,
+      checkpoint_head: checkpointHead,
+      before,
+      after: scopeCheck(cwd, allowed),
+      rolled_back: rolledBack,
+      removed_untracked: removedUntracked,
+    };
+  }
+
+  const after = scopeCheck(cwd, allowed);
+  return {
+    ok: after.ok && after.paths.length === 0,
+    authority_violation: false,
+    rollback_failed: !(after.ok && after.paths.length === 0),
+    rollback_error: after.ok && after.paths.length === 0 ? null : 'worktree remained dirty after authorized rollback',
+    checkpoint_head: checkpointHead,
+    before,
+    after,
+    rolled_back: rolledBack,
+    removed_untracked: removedUntracked,
+  };
 }
 
 function hostVerify(cwd, rawTask) {
@@ -89,13 +244,27 @@ function hostVerify(cwd, rawTask) {
 }
 
 function commitTask(cwd, taskId, allowed) {
-  const add = runSync('git', ['add', '--', ...allowed], { cwd });
+  const scope = scopeCheck(cwd, allowed);
+  if (!scope.ok) {
+    const err = new Error(`unauthorized paths before commit for ${taskId}: ${scope.unauthorized.join(',')}`);
+    err.code = 'SPRINT_AUTHORITY';
+    err.scope = scope;
+    throw err;
+  }
+  if (scope.paths.length === 0) throw new Error(`task ${taskId} produced no change`);
+
+  const add = runSync('git', ['--literal-pathspecs', 'add', '-A', '--', ...scope.paths], { cwd });
   if (add.exit !== 0) throw new Error(`git add failed for ${taskId}: ${add.stderr}`);
-  const staged = runSync('git', ['diff', '--cached', '--name-only'], { cwd });
+  const staged = runSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd });
   if (staged.exit !== 0) throw new Error(`cannot inspect staged paths for ${taskId}`);
-  const stagedPaths = staged.stdout.split('\n').filter(Boolean).sort();
-  const unauthorized = stagedPaths.filter((p) => !allowed.includes(p));
-  if (unauthorized.length) throw new Error(`unauthorized staged paths for ${taskId}: ${unauthorized.join(',')}`);
+  const stagedPaths = splitNul(staged.stdout).sort();
+  const unauthorized = stagedPaths.filter((p) => !isAuthorizedPath(p, allowed));
+  if (unauthorized.length) {
+    const err = new Error(`unauthorized staged paths for ${taskId}: ${unauthorized.join(',')}`);
+    err.code = 'SPRINT_AUTHORITY';
+    err.scope = { paths: stagedPaths, unauthorized, ok: false };
+    throw err;
+  }
   if (stagedPaths.length === 0) throw new Error(`task ${taskId} produced no staged change`);
   const commit = runSync('git', ['commit', '-qm', `sprint: ${taskId}`], { cwd });
   if (commit.exit !== 0) throw new Error(`git commit failed for ${taskId}: ${commit.stderr}`);
@@ -195,6 +364,14 @@ function assertClean(cwd) {
   if (status.stdout.trim()) fail('workdir must be clean at sprint start');
 }
 
+function validateAuthority(spec) {
+  for (const task of spec.tasks) {
+    const allowed = task.authority?.write ?? [];
+    const invalid = allowed.filter((pattern) => parseAuthorityPattern(pattern) === null);
+    if (invalid.length > 0) fail(`invalid authority.write pattern for ${task.id}: ${invalid.join(',')}`);
+  }
+}
+
 function preflight() {
   if (process.version !== 'v24.19.0') fail(`Node v24.19.0 required; got ${process.version}`);
   const dsh = runSync('smokestack-dsh', ['--profile', 'headless', '--dump-config'], { timeoutMs: 120000 });
@@ -289,6 +466,7 @@ async function runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, rese
 export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
   preflight();
   assertClean(cwd);
+  validateAuthority(spec);
   const requiresResearch = spec.tasks.some((t) => t.research_required === true);
   let mcpInstall = null;
   if (requiresResearch) {
@@ -314,14 +492,31 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
     tasks: [],
     checkpoints: [],
   };
+  let hardStop = null;
 
   while (sprint.state === 'ACTIVE') {
     const frontier = readyFrontier(sprint);
     if (frontier.length === 0) break;
+
+    const boundaryPaths = changedPaths(cwd);
+    if (boundaryPaths.length > 0) {
+      hardStop = { reason: 'DIRTY_TASK_BOUNDARY', paths: boundaryPaths };
+      break;
+    }
+
     const taskId = frontier[0];
     const task = rawById.get(taskId);
+    const checkpointHead = resolveHead(cwd);
     console.log(`\n=== SPRINT TASK ${taskId} mode=${task.mode} ===`);
-    const taskReceipt = { id: taskId, mode: task.mode, research: null, lifecycle: null, commit: null };
+    const taskReceipt = {
+      id: taskId,
+      mode: task.mode,
+      checkpoint_head: checkpointHead,
+      research: null,
+      lifecycle: null,
+      reconciliation: null,
+      commit: null,
+    };
 
     let researchEvidence = null;
     if (task.research_required === true) {
@@ -336,8 +531,18 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
       };
       if (!research.ok) {
         recordResearch(sprint, taskId, { ok: false, reason: 'RESEARCH_MCP_OR_EVIDENCE_GATE_FAILED' });
+        taskReceipt.reconciliation = reconcileNonPassWorktree(cwd, task.authority?.write ?? [], checkpointHead);
         receipt.tasks.push(taskReceipt);
         receipt.checkpoints.push(checkpoint(sprint));
+        if (!taskReceipt.reconciliation.ok) {
+          hardStop = {
+            reason: taskReceipt.reconciliation.authority_violation ? 'AUTHORITY_VIOLATION' : 'AUTHORIZED_ROLLBACK_FAILED',
+            task_id: taskId,
+            reconciliation: taskReceipt.reconciliation,
+          };
+          break;
+        }
+        if (receiptPath) writeJson(receiptPath, { ...receipt, current: checkpoint(sprint) });
         continue;
       }
       researchEvidence = research.parsed.evidence;
@@ -350,19 +555,41 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
       try {
         taskReceipt.commit = commitTask(cwd, taskId, task.authority?.write ?? []);
       } catch (err) {
-        fail(`host commit checkpoint failed after ${taskId}: ${err.message}`);
+        taskReceipt.commit_error = {
+          code: err.code ?? 'HOST_COMMIT_CHECKPOINT_FAILED',
+          message: err.message,
+          scope: err.scope ?? null,
+        };
+        hardStop = {
+          reason: err.code === 'SPRINT_AUTHORITY' ? 'AUTHORITY_VIOLATION' : 'HOST_COMMIT_CHECKPOINT_FAILED',
+          task_id: taskId,
+          commit_error: taskReceipt.commit_error,
+        };
+      }
+    } else {
+      taskReceipt.reconciliation = reconcileNonPassWorktree(cwd, task.authority?.write ?? [], checkpointHead);
+      if (!taskReceipt.reconciliation.ok) {
+        hardStop = {
+          reason: taskReceipt.reconciliation.authority_violation ? 'AUTHORITY_VIOLATION' : 'AUTHORIZED_ROLLBACK_FAILED',
+          task_id: taskId,
+          reconciliation: taskReceipt.reconciliation,
+        };
       }
     }
 
     receipt.tasks.push(taskReceipt);
     receipt.checkpoints.push(checkpoint(sprint));
-    if (receiptPath) writeJson(receiptPath, { ...receipt, current: checkpoint(sprint) });
+    if (receiptPath) writeJson(receiptPath, { ...receipt, current: checkpoint(sprint), hard_stop: hardStop });
+    if (hardStop) break;
   }
 
   const final = checkpoint(sprint);
   const gitStatus = runSync('git', ['status', '--porcelain'], { cwd });
   receipt.finished_at = new Date().toISOString();
   receipt.final = final;
+  receipt.controller_state = hardStop ? 'FAILED' : final.state;
+  receipt.controller_terminal_reason = hardStop?.reason ?? final.terminal_reason;
+  receipt.hard_stop = hardStop;
   receipt.clean_worktree = gitStatus.exit === 0 && gitStatus.stdout.trim() === '';
   if (receiptPath) writeJson(receiptPath, receipt);
 
@@ -372,7 +599,8 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
   console.log(JSON.stringify({
     sprint_id: receipt.sprint_id,
     state: final.state,
-    terminal_reason: final.terminal_reason,
+    controller_state: receipt.controller_state,
+    terminal_reason: receipt.controller_terminal_reason,
     clean_worktree: receipt.clean_worktree,
     task_states: Object.fromEntries(Object.entries(final.tasks).map(([id, t]) => [id, t.state])),
     checkpoint_sha256: final.sha256,
@@ -388,7 +616,7 @@ async function main() {
   const receiptPath = path.resolve(args.receipt ?? path.join('/tmp', `${spec.sprint_id}-receipt.json`));
   const researchMcp = args.researchMcpCommand ? { command: args.researchMcpCommand, args: args.researchMcpArgs } : null;
   const { receipt } = await runLiveSprint({ spec, cwd, receiptPath, researchMcp });
-  process.exit(receipt.final.state === 'PASS' && receipt.clean_worktree ? 0 : 2);
+  process.exit(receipt.controller_state === 'PASS' && receipt.clean_worktree ? 0 : 2);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
