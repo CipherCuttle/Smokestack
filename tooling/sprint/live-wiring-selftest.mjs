@@ -504,6 +504,123 @@ test('effective external attributes and excludes mutations fail closed', () => {
   }
 });
 
+test('Git %(prefix) expansion binds the same attributes and excludes files Git consumes', () => {
+  const external = fs.mkdtempSync(path.join('/tmp', 'smokestack-prefix-reference-'));
+  const globalConfig = path.join(external, 'global.config');
+  const targetDir = fs.mkdtempSync(path.join('/tmp', 'smokestack-prefix-target-'));
+  const previous = {
+    global: process.env.GIT_CONFIG_GLOBAL,
+    system: process.env.GIT_CONFIG_NOSYSTEM,
+  };
+  try {
+    fs.writeFileSync(globalConfig, '');
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    const cwd = createReconciliationRepo();
+    try {
+      const attributes = path.join(targetDir, 'attributes');
+      const excludes = path.join(targetDir, 'excludes');
+      fs.writeFileSync(attributes, '*.txt text\n');
+      fs.writeFileSync(excludes, 'prefix-ignore.txt\n');
+      const prefixPath = (target) => `%(prefix)/../${path.relative('/', target)}`;
+      fs.writeFileSync(globalConfig, `[core]\n\tattributesFile = ${prefixPath(attributes)}\n\texcludesFile = ${prefixPath(excludes)}\n`);
+      const tracked = path.join(cwd, 'experiments/qualification/tracked.txt');
+      const ignored = path.join(cwd, 'prefix-ignore.txt');
+      fs.writeFileSync(ignored, 'prefix ignore target\n');
+
+      const before = captureGitMetadataState(cwd);
+      assert.equal(before.ok, true, JSON.stringify(before));
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: set/);
+      assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 0);
+      assert.ok(Object.values(before.files).some((entry) => entry?.target === attributes));
+      assert.ok(Object.values(before.files).some((entry) => entry?.target === excludes));
+
+      fs.writeFileSync(attributes, '*.txt -text\n');
+      const afterAttributes = captureGitMetadataState(cwd);
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+      assert.equal(compareGitMetadataState(before, afterAttributes).ok, false);
+
+      const excludesBefore = captureGitMetadataState(cwd);
+      fs.writeFileSync(excludes, '# prefix exclude removed\n');
+      const afterExcludes = captureGitMetadataState(cwd);
+      assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 1);
+      assert.equal(compareGitMetadataState(excludesBefore, afterExcludes).ok, false);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  } finally {
+    if (previous.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.global;
+    if (previous.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
+    fs.rmSync(external, { recursive: true, force: true });
+    fs.rmSync(targetDir, { recursive: true, force: true });
+  }
+});
+
+test('implicit XDG global attributes and excludes files are bound', () => {
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-xdg-reference-'));
+  const configHome = path.join(external, 'config');
+  const globalConfig = path.join(external, 'global.config');
+  const home = path.join(external, 'home');
+  const previous = {
+    global: process.env.GIT_CONFIG_GLOBAL,
+    system: process.env.GIT_CONFIG_NOSYSTEM,
+    xdg: process.env.XDG_CONFIG_HOME,
+    home: process.env.HOME,
+  };
+  try {
+    fs.mkdirSync(path.join(configHome, 'git'), { recursive: true });
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(globalConfig, '');
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.XDG_CONFIG_HOME = configHome;
+    process.env.HOME = home;
+    const cwd = createReconciliationRepo();
+    try {
+      const attributes = path.join(configHome, 'git', 'attributes');
+      const excludes = path.join(configHome, 'git', 'ignore');
+      const tracked = path.join(cwd, 'experiments/qualification/tracked.txt');
+      const ignored = path.join(cwd, 'implicit-xdg-ignore.txt');
+      fs.writeFileSync(attributes, '*.txt text\n');
+      fs.writeFileSync(excludes, 'implicit-xdg-ignore.txt\n');
+      fs.writeFileSync(ignored, 'implicit XDG ignore target\n');
+
+      const before = captureGitMetadataState(cwd);
+      assert.equal(before.ok, true, JSON.stringify(before));
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: set/);
+      assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 0);
+      assert.equal(before.files['<effective-git-config-default-reference>/core.attributesfile'].target, attributes);
+      assert.equal(before.files['<effective-git-config-default-reference>/core.excludesfile'].target, excludes);
+
+      fs.writeFileSync(attributes, '*.txt -text\n');
+      const afterAttributes = captureGitMetadataState(cwd);
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+      assert.equal(compareGitMetadataState(before, afterAttributes).ok, false);
+
+      fs.writeFileSync(attributes, '*.txt text\n');
+      const excludesBefore = captureGitMetadataState(cwd);
+      fs.writeFileSync(excludes, '# implicit XDG exclude removed\n');
+      const afterExcludes = captureGitMetadataState(cwd);
+      assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 1);
+      assert.equal(compareGitMetadataState(excludesBefore, afterExcludes).ok, false);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  } finally {
+    if (previous.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.global;
+    if (previous.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
+    if (previous.xdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous.xdg;
+    if (previous.home === undefined) delete process.env.HOME;
+    else process.env.HOME = previous.home;
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
 function createFilterRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-filter-'));
   runGit(cwd, ['init', '-q']);

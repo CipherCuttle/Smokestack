@@ -291,16 +291,37 @@ function parseGitConfigRecords(text, label) {
   return records;
 }
 
-function resolveGitConfigReference(cwd, rawValue) {
-  let value = rawValue.trim();
+function resolveGitConfigReference(cwd, expandedValue) {
+  const value = expandedValue.trim();
   if (!value || value.includes('\0')) throw new Error('Git file reference is empty or malformed');
-  if (value === '~') value = homedir();
-  else if (value.startsWith('~/')) value = path.join(homedir(), value.slice(2));
-  else if (value.startsWith('~')) throw new Error(`Git file reference uses unsupported home expansion: ${rawValue}`);
-  // Git resolves these effective core paths from the command's worktree
-  // context, not from the config file's directory (verified for relative
-  // attributesFile/excludesFile values).
+  if (value.includes('%(') || value === '~' || value.startsWith('~/') || value.startsWith('~')) {
+    throw new Error(`Git file reference was not fully expanded: ${expandedValue}`);
+  }
+  // Git --path expands supported path syntax. Git resolves relative core
+  // paths from the command's worktree context, so only that final relative
+  // resolution remains here.
   return path.resolve(cwd, value);
+}
+
+function gitConfigReferenceRecords(cwd, scopeArgs, label) {
+  const result = runSync('git', [
+    'config',
+    ...scopeArgs,
+    '--path',
+    '--show-origin',
+    '--null',
+    '--get-regexp',
+    '^(core.attributesfile|core.excludesfile)$',
+  ], { cwd });
+  if (result.exit === 1 && result.stdout === '') return [];
+  if (result.exit !== 0) throw new Error(`cannot inspect ${label} Git config references: ${result.stderr}`);
+  return parseGitConfigRecords(result.stdout, `${label} reference`);
+}
+
+function defaultGitConfigReference(cwd, fileName) {
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), '.config');
+  if (configHome.includes('\0')) throw new Error('Git XDG config home is malformed');
+  return path.resolve(cwd, configHome, 'git', fileName);
 }
 
 export function captureGitMetadataState(cwd) {
@@ -340,7 +361,7 @@ export function captureGitMetadataState(cwd) {
       const key = path.relative(root, origin) || record.origin;
       files[key] = metadataFileFingerprint(origin, authorities);
     }
-    const references = configRecords.filter((record) => record.key === 'core.attributesfile' || record.key === 'core.excludesfile');
+    const references = gitConfigReferenceRecords(cwd, ['--local', '--includes'], 'local');
     if (references.length > MAX_GIT_CONFIG_REFERENCES) throw new Error('security-relevant Git config reference limit exceeded');
     const referenceCounts = new Map();
     for (const reference of references) {
@@ -359,12 +380,9 @@ export function captureGitMetadataState(cwd) {
       present: true,
       sha256: crypto.createHash('sha256').update(effectiveConfig.stdout).digest('hex'),
     };
-    const effectiveReferences = ['core.attributesfile', 'core.excludesfile'];
-    for (const key of effectiveReferences) {
-      const result = runSync('git', ['config', '--includes', '--show-origin', '--null', '--get-regexp', `^${key}$`], { cwd });
-      if (result.exit === 1 && result.stdout === '') continue;
-      if (result.exit !== 0) throw new Error(`cannot inspect effective ${key}: ${result.stderr}`);
-      const records = parseGitConfigRecords(result.stdout, 'effective');
+    const effectiveReferences = gitConfigReferenceRecords(cwd, ['--includes'], 'effective');
+    for (const key of ['core.attributesfile', 'core.excludesfile']) {
+      const records = effectiveReferences.filter((record) => record.key === key);
       if (records.length > MAX_GIT_CONFIG_REFERENCES) throw new Error('effective Git config reference limit exceeded');
       const referenceCounts = new Map();
       for (const record of records) {
@@ -374,6 +392,14 @@ export function captureGitMetadataState(cwd) {
         const ordinal = referenceCounts.get(key) ?? 0;
         referenceCounts.set(key, ordinal + 1);
         files[`<effective-git-config-reference>/${key}/${ordinal}`] = {
+          target,
+          fingerprint: metadataFileFingerprint(target, authorities),
+        };
+      }
+      if (records.length === 0) {
+        const fileName = key === 'core.attributesfile' ? 'attributes' : 'ignore';
+        const target = defaultGitConfigReference(cwd, fileName);
+        files[`<effective-git-config-default-reference>/${key}`] = {
           target,
           fingerprint: metadataFileFingerprint(target, authorities),
         };
