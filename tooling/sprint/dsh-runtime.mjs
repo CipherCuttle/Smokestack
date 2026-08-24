@@ -3,6 +3,10 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const toolGuardSource = path.join(here, 'dsh-tool-call-guard.mjs');
 
 export function runSync(cmd, args, opts = {}) {
   const started = Date.now();
@@ -188,6 +192,10 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
   fs.mkdirSync(controlDir, { recursive: true });
   const parent = path.join(controlDir, `parent-${phase}.yml`);
   const role = path.join(controlDir, `role-${phase}.yml`);
+  const guardPlugin = path.join(controlDir, 'dsh-tool-call-guard.mjs');
+  const guardLedger = path.join(controlDir, 'tool-call-ledger.jsonl');
+  fs.copyFileSync(toolGuardSource, guardPlugin);
+  fs.rmSync(guardLedger, { force: true });
 
   fs.writeFileSync(parent, `- id: llm-pi-ai
   config:
@@ -209,7 +217,13 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
             maxTokens: 8192
 `);
 
-  const rows = [];
+  const rows = [
+    `- id: smokestack-tool-call-guard
+  name: './dsh-tool-call-guard.mjs'
+`,
+  ];
+  const guardLimits = {};
+  const guardObserve = [];
   if (phase === 'research') {
     rows.push(`- id: tool-subagent-codex-implementer
   disabled: true
@@ -218,6 +232,7 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
   disabled: true
 `);
     if (!researchMcp) throw new Error('research phase requires researchMcp configuration');
+    guardObserve.push('mcp__literature__search_literature', 'mcp__literature__verify_source');
     rows.push(`- id: mcp-sprint-literature
   name: '@deepseek-ai/dsh-mcp-client'
   config:
@@ -231,10 +246,12 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
       enabled: false
 `);
   } else if (phase === 'implement' || phase === 'repair') {
+    guardLimits.subagent_codex_implementer = 1;
     rows.push(`- id: tool-subagent-claude-reviewer
   disabled: true
 `);
   } else if (phase === 'review' || phase === 'rereview') {
+    guardLimits.subagent_claude_reviewer = 1;
     rows.push(`- id: tool-subagent-codex-implementer
   disabled: true
 `);
@@ -242,7 +259,25 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
     throw new Error(`unsupported DSH phase: ${phase}`);
   }
   fs.writeFileSync(role, rows.join('\n'));
-  return { parent, role };
+  return { parent, role, guardLedger, guardLimits, guardObserve };
+}
+
+export function readToolGuardLedger(file) {
+  if (!file || !fs.existsSync(file)) return { ok: false, error: 'tool guard ledger missing', events: [] };
+  const events = [];
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+  try {
+    for (const line of lines) {
+      const event = JSON.parse(line);
+      if (!event || typeof event !== 'object' || typeof event.stage !== 'string' || typeof event.name !== 'string') {
+        throw new Error('invalid tool guard ledger event');
+      }
+      events.push(event);
+    }
+  } catch (err) {
+    return { ok: false, error: err.message, events: [] };
+  }
+  return { ok: true, error: null, events };
 }
 
 export function parseReviewGate(text) {
@@ -274,7 +309,13 @@ export async function dshRun({ cwd, patches, prompt, label, timeoutSeconds = 300
     prompt,
   ], {
     cwd,
-    env: { DSH_PERMISSION_MODE: 'read-only', DSH_TOOLS_MODE: 'native' },
+    env: {
+      DSH_PERMISSION_MODE: 'read-only',
+      DSH_TOOLS_MODE: 'native',
+      SMOKESTACK_TOOL_GUARD_LEDGER: patches.guardLedger,
+      SMOKESTACK_TOOL_GUARD_LIMITS: JSON.stringify(patches.guardLimits ?? {}),
+      SMOKESTACK_TOOL_GUARD_OBSERVE: JSON.stringify(patches.guardObserve ?? []),
+    },
     timeoutMs: (timeoutSeconds + 10) * 1000,
     label,
   });
