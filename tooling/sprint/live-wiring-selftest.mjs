@@ -258,7 +258,9 @@ test('ignored workspace mutation is detected even when Git porcelain stays clean
     fs.writeFileSync(path.join(cwd, 'ignored/new.txt'), 'new\n');
     const secondDiff = compareIgnoredState(second, captureIgnoredState(cwd));
     assert.equal(secondDiff.ok, false);
-    assert.deepEqual(secondDiff.changes, ['ignored', 'ignored/new.txt']);
+    // Git versions differ on whether the already-existing ignored parent
+    // directory is emitted as a root; the mutation itself must always be detected.
+    assert.ok(secondDiff.changes.includes('ignored/new.txt'));
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
