@@ -34,13 +34,9 @@ The sprint is long-lived; model episodes are bounded and replaceable.
 
 ## Modes
 
-FAST:
+FAST: `IMPLEMENT -> HOST VERIFY -> HOST COMMIT -> CLOSE`
 
-`IMPLEMENT -> HOST VERIFY -> HOST COMMIT -> CLOSE`
-
-REVIEWED:
-
-`IMPLEMENT -> HOST VERIFY -> TEN_STACK REVIEW -> [C/H only] REPAIR(1) -> RETEST -> REREVIEW(1) -> HOST COMMIT/CLOSE or BLOCK`
+REVIEWED: `IMPLEMENT -> HOST VERIFY -> TEN_STACK REVIEW -> [C/H only] REPAIR(1) -> RETEST -> REREVIEW(1) -> HOST COMMIT/CLOSE or BLOCK`
 
 GOVERNED adds a separate MCP research episode before implementation when the task contract requires evidence.
 
@@ -78,15 +74,7 @@ Research cannot borrow lifecycle budget and the parent cannot enlarge either cei
 
 V0 allows one writer at a time. A task begins from a clean Git state.
 
-After a task reaches PASS the host:
-
-1. confirms only `authority.write` paths changed;
-2. stages only those paths;
-3. re-checks staged paths;
-4. creates `sprint: <task-id>` checkpoint commit;
-5. advances the DAG.
-
-A model never creates the success checkpoint. Unauthorized writes are fail-closed.
+After a task reaches PASS the host confirms only `authority.write` paths changed, stages only those paths, re-checks the staged set, creates `sprint: <task-id>` checkpoint commit, then advances the DAG. A model never creates the success checkpoint. Unauthorized writes fail closed.
 
 ## Human escalation
 
