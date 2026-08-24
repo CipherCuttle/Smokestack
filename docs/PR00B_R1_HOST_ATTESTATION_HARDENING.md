@@ -1,17 +1,22 @@
 # PR-00B R1 — Host Attestation Hardening
 
-Status: `FROZEN_IMPLEMENTATION_PENDING`
+Status: `CRITICAL_HIGH_REPAIR_PENDING`
 
 ## Identity
 
 - Phase: `PR-00B_R1_HOST_ATTESTATION_HARDENING`
 - Predecessor terminal candidate: `90816bc445a2d5965df5f12ef4d46be56609abd6`
-- Predecessor verdict: `CLOSED_FAIL_TARGETED_REREVIEW_CRITICAL_HIGH_FOUND`
-- Scope source: the one independent targeted rereview of PR-00B V0.
+- Frozen hostile-review candidate: `669d3add0c489a900ede47a6064c50d8678288af`
+- Hostile review result: `R1_HOSTILE_REVIEW_GATE: CRITICAL_HIGH_FOUND`
+- Hostile review counts: Critical 0 / High 3 / Medium 0 / Low 0.
+- Hostile review budget: consumed.
+- Targeted rereview budget remaining: exactly one, after the bounded C/H repair.
 
-R1 exists only to repair the four reproduced High-severity host-control failures below. It is not authority to redesign the controller, run live model qualification, merge, or begin PR-01.
+The hostile-review wrapper rejected its receipt only because the reviewer repeated the same terminal gate twice. The substantive review result is unambiguous, the reviewer remained read-only, and the review is not rerun.
 
-## Frozen High findings
+R1 exists only to repair the reproduced host-control failures below. It is not authority to run live model qualification, merge, or begin PR-01.
+
+## Original R1 High findings
 
 ### R1-H01 — strict tool-ledger correlation
 
@@ -28,105 +33,128 @@ Required properties:
 7. REVIEW/REREVIEW requires exactly one allowed, successful Claude child call and no other Claude child call.
 8. A denied second child call followed by any parent success marker cannot PASS.
 
-Required falsification tests include duplicate error→success result overwrite, success→error duplicate result, missing/empty ids, duplicate call ids, orphan results, result-before-call, wrong-name result correlation, malformed ordinals, and incomplete call/result settlement.
-
 ### R1-H02 — complete local-state contamination boundary
 
-Failure reproduced: ignored-state attestation misses empty ignored directories, mutations reachable through pre-existing ignored symlinks, and Git metadata/config outside ordinary worktree path enumeration.
-
-Required properties:
-
-1. Relevant ignored filesystem entries, including directories, are represented in the baseline/final attestation.
-2. Empty ignored directory creation/deletion is detectable.
-3. Symlinks are never followed outside the repository attestation boundary; an ignored symlink resolving outside the repository must fail closed, or its external target must be independently immutable/attested. Default R1 policy: fail closed on external targets.
-4. Internal symlink identity/target changes are detectable without escaping the repository root.
-5. Security-relevant repository Git metadata/config that can change staging/commit semantics is separately attested and unauthorized mutation fails closed. At minimum bind effective/local Git config relevant to filters, hooks, attributes/config includes, and repository-path/worktree identity.
-6. Ignored-state failure may never be converted to silent cleanup.
-7. Cross-task inheritance of a detected mutation is prohibited.
-
-Required falsification tests include empty ignored directory creation/deletion, external ignored symlink target attack, internal symlink replacement, `.git/config` mutation, config/include/filter mutation where applicable, and ignored state capable of affecting a later task/test.
+Required properties include ignored directories/files, internal/external symlink boundaries, security-relevant Git metadata/config, fail-closed mutation handling, and no cross-task inheritance.
 
 ### R1-H03 — MCP evidence payload binding
-
-Failure reproduced: successful transport/tool calls with arbitrary verify arguments can satisfy research validation even when IDs were not returned by search and verification payload did not assert successful verification.
 
 Required chain:
 
 `successful search result payload -> host-extracted source id -> successful verify_source(id) result payload -> matching id + verified:true -> evidence source id`
 
-Required properties:
-
-1. Host ledger records a deterministic, bounded representation of successful MCP result payloads sufficient for attestation.
-2. Evidence source ids must be present in successful search result payload(s).
-3. Each evidence source id must have exactly one acceptable verification result bound to the same id.
-4. Verification payload must explicitly assert the expected positive verification state (`verified: true` or the fixture contract's exact equivalent).
-5. Transport success alone is insufficient.
-6. Duplicate verification of one source cannot satisfy the >=2 distinct-source requirement.
-7. Fabricated IDs, mismatched payload IDs, missing payloads, malformed payloads, error results, and incomplete settlement fail closed.
-
-Required falsification tests include `FAB-A/FAB-B` never returned by search, successful transport with `verified:false`, mismatched returned id, malformed result body, duplicate verification, and evidence id absent from search results.
-
 ### R1-H04 — verified-content/terminal-truth binding
 
-Failure reproduced: staging can transform authorized content after host verification (for example through a Git clean filter), while path-only parent/path attestation still succeeds. Separately, final clean-state attestation can fail while `controller_state` remains `PASS`.
+Required properties include post-host-verify content/mode attestation, staged-tree equality, committed-tree equality, filter-transform rejection, checkpoint parent/path binding, and `PASS => every final attestation true`.
 
-Required properties:
+## Hostile-review C/H repair scope
 
-1. After host verification, capture a deterministic content+mode attestation for the complete authorized change set that is eligible to commit.
-2. Staged tree/content must exactly equal the post-verification attestation before commit.
-3. Committed tree/content must exactly equal the same attestation after commit.
-4. Git filters or other staging-time transforms that alter verified content must cause a hard failure before/at checkpoint acceptance.
-5. Existing exact checkpoint parent and committed path-set checks remain required.
-6. Any final Git-state, ignored-state, Git-metadata, content, or checkpoint attestation failure forces terminal controller failure; `controller_state=PASS` with `clean_worktree=false` is forbidden.
-7. Hard-stop/failure receipts remain inspectable and never claim task/sprint PASS.
+The one broad hostile review of frozen candidate `669d3add0c489a900ede47a6064c50d8678288af` reproduced three remaining High findings. The bounded repair may address only these findings plus regression fallout from their fixes.
 
-Required falsification tests include a malicious clean filter that stages altered content, mode-only changes, partial staging/commit failure, final ignored mutation after last task, and explicit proof that terminal PASS implies every final attestation is true.
+### R1-RH01 — HIGH — mutable tool-ledger evidence
+
+The current tool guard emits host authority evidence to a filesystem ledger. The reviewer demonstrated that four genuine events containing a denied second child call can be reduced to a valid two-event call/result pair, after which host validation returns `ok: true`.
+
+Repair requirements:
+
+- child/model-controlled execution must not be able to rewrite, truncate, replace, delete, or forge the evidence channel used for child-call ceilings;
+- same-UID file permissions alone are not accepted as isolation;
+- first inspect the real DSH/Codex subagent process/sandbox topology and determine whether the actual child can reach the evidence channel;
+- if reachability exists, replace the filesystem ledger authority with a mechanically isolated host-owned channel or equivalent fail-closed design;
+- if reachability is mechanically impossible, add an executable regression that proves the real topology blocks the attack;
+- missing/truncated/duplicate/reordered/injected evidence remains fail-closed.
+
+### R1-RH02 — HIGH — local-state metadata coverage incomplete
+
+The reviewer reproduced:
+
+1. touching an existing ignored directory is invisible because directory `mtime_ns` / `ctime_ns` are stored as null;
+2. an effective external `core.attributesFile` may change after baseline and alter staging semantics without changing current metadata comparison.
+
+Repair requirements:
+
+- attest relevant ignored-directory timestamps or an equivalent deterministic mutation signal;
+- effective Git configuration references capable of changing ignored/staging/commit semantics must be independently fingerprinted/bound or rejected fail-closed when outside trusted authority;
+- cover `core.attributesFile` and inspect analogous file-valued semantics such as excludes/config includes rather than fixing only one string;
+- preserve bounded resource limits and existing symlink/config/include/filter protections.
+
+### R1-RH03 — HIGH — semantic duplicate MCP sources
+
+The reviewer reproduced distinct IDs `A` and `B` representing the same underlying source identity/content. Both verified positively and current validation treated them as two distinct sources.
+
+Repair requirements:
+
+- the >=2 source gate requires >=2 distinct canonical source identities, not merely distinct opaque IDs;
+- derive/bind a deterministic canonical source identity or fingerprint from search payload and verification payload;
+- reject two IDs that canonicalize to the same source;
+- reject search/verification canonical-identity mismatch;
+- preserve fabricated-ID, negative verification, malformed/error/incomplete, duplicate-ID, and missing-search-source rejection.
+
+## Required C/H repair tests
+
+Before the repair can freeze for targeted rereview, executable local tests/probes must prove:
+
+1. the prior ledger truncation/rewrite attack cannot yield host PASS under the actual authority topology;
+2. existing ignored-directory timestamp mutation is detected;
+3. mutation of an effective external `core.attributesFile` cannot silently alter staging semantics;
+4. analogous effective Git file references are either fingerprinted or fail closed;
+5. two distinct MCP IDs for one canonical source are rejected;
+6. search/verify canonical identity mismatch is rejected;
+7. all prior R1 regression controls remain passing.
 
 ## Required regression set
 
 R1 must retain all previously passing controls:
 
 - actual monotonic pre-dispatch child-call ceiling;
+- strict ledger schema/correlation;
 - child-created HEAD drift rejection;
 - authorized non-PASS rollback -> different READY task;
-- unauthorized tracked/untracked mutation preserved and blocks cleanup;
-- staged add/delete/rename and literal-path behavior;
+- unauthorized mutation preserved;
+- staged add/delete/rename and literal path behavior;
 - verify-command unauthorized side effects rejection;
 - pre-commit hook suppression;
 - exact checkpoint parent and committed path-set binding;
-- process failure/incomplete receipt rejection;
-- deterministic read-only qualification MCP fixture behavior.
+- ignored files/directories and symlink controls;
+- MCP fabricated/negative/mismatched/malformed/error/incomplete rejection;
+- malicious clean-filter staging rejection;
+- mode-only/deletion content attestation;
+- final PASS implies all final attestations true;
+- deterministic read-only qualification MCP fixture.
 
 ## Completion policy
 
-Bounded policy for R1:
+Bounded R1 policy:
 
-`IMPLEMENT -> ZERO-MODEL TESTS -> FULL CI/TYPECHECK -> ONE INDEPENDENT HOSTILE REVIEW -> fix genuine Critical/High if any -> at most ONE targeted rereview only if such fixes were required -> CLOSE`
+`IMPLEMENT -> ZERO-MODEL TESTS -> FULL CI/TYPECHECK -> ONE INDEPENDENT HOSTILE REVIEW -> fix genuine Critical/High if any -> at most ONE targeted rereview -> CLOSE`
+
+Current position:
+
+`C/H REPAIR -> ZERO-MODEL TESTS -> FULL CI/TYPECHECK -> ONE TARGETED REREVIEW -> CLOSE`
+
+No second broad review is permitted. If the targeted rereview still returns Critical/High, R1 closes FAIL rather than starting another repair/review loop.
 
 Medium/Low do not reopen R1 unless they invalidate the frozen objective/evidence/fail-closed boundary.
-
-If the first independent hostile review returns no Critical/High, R1 closes PASS immediately. Do not perform a second generic review.
-
-If a targeted rereview after a Critical/High repair still returns Critical/High, R1 closes FAIL rather than beginning another repair/review loop.
 
 ## Acceptance gate
 
 R1 may close PASS only when all are true:
 
-- the four reproduced exploit classes are represented by tests that fail against predecessor `90816bc445a2d5965df5f12ef4d46be56609abd6` and pass on R1;
+- the original exploit classes and the three hostile-review Highs are represented by fail-closed tests/probes;
 - full zero-model suite passes;
-- repository CI/typecheck passes in the intended environment;
-- no live DSH/model-backed four-task qualification occurred during R1 implementation/review;
-- one independent hostile review returns no remaining Critical/High, or one allowed targeted rereview after a C/H repair returns no remaining Critical/High;
-- final candidate SHA is frozen and recorded.
+- repository CI/typecheck passes;
+- no live four-task qualification occurred during R1 implementation/review/repair;
+- the one allowed targeted rereview returns no remaining Critical/High;
+- final repair SHA is frozen and recorded.
 
 Only after R1 closes PASS may the separate one-live-four-task qualification gate be consumed.
 
 ## Explicitly unauthorized
 
-- merging PR-00B V0 or R1 during this phase;
+- merge;
 - live four-task model qualification;
 - product PR-01 work;
-- changing DSH/provider/model topology except where strictly necessary to preserve the frozen host-control contract;
-- weakening or deleting exploit tests to obtain PASS;
-- another open-ended review loop.
+- second broad hostile review;
+- more than one targeted rereview;
+- weakening/deleting exploit tests;
+- unrelated redesign.
