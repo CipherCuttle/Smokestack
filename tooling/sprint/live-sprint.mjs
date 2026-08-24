@@ -90,31 +90,99 @@ export function changedPaths(cwd) {
   ])].sort();
 }
 
-function ignoredFingerprint(cwd, repoPath) {
-  const normalized = normalizeRepoPath(repoPath);
-  if (!normalized) throw new Error(`unsafe ignored path: ${repoPath}`);
-  const root = path.resolve(cwd);
-  const target = path.resolve(root, normalized);
-  if (target === root || !target.startsWith(`${root}${path.sep}`)) throw new Error(`ignored path escapes workdir: ${repoPath}`);
+const MAX_IGNORED_ENTRIES = 20_000;
+const MAX_GIT_METADATA_FILE = 2 * 1024 * 1024;
+const MAX_CONTENT_FILE = 64 * 1024 * 1024;
+
+function within(root, target) {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function ignoredFingerprint(root, repoPath, target) {
   const stat = fs.lstatSync(target, { bigint: true });
-  return {
+  const type = stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : 'other';
+  if (type === 'other') throw new Error(`unsupported ignored filesystem entry: ${repoPath}`);
+  const fingerprint = {
+    type,
     dev: String(stat.dev),
     ino: String(stat.ino),
     mode: String(stat.mode),
     size: String(stat.size),
-    mtime_ns: String(stat.mtimeNs),
-    ctime_ns: String(stat.ctimeNs),
-    link: stat.isSymbolicLink() ? fs.readlinkSync(target) : null,
+    mtime_ns: type === 'directory' ? null : String(stat.mtimeNs),
+    ctime_ns: type === 'directory' ? null : String(stat.ctimeNs),
+    link: type === 'symlink' ? fs.readlinkSync(target) : null,
+    resolved: null,
+    target: null,
   };
+  if (type === 'symlink') {
+    let resolved;
+    try { resolved = fs.realpathSync.native(target); } catch (err) { throw new Error(`ignored symlink cannot be resolved: ${repoPath}: ${err.message}`); }
+    if (!within(root, resolved)) throw new Error(`ignored symlink escapes workdir: ${repoPath}`);
+    fingerprint.resolved = path.relative(root, resolved) || '.';
+    const targetStat = fs.lstatSync(resolved, { bigint: true });
+    fingerprint.target = {
+      type: targetStat.isDirectory() ? 'directory' : targetStat.isFile() ? 'file' : targetStat.isSymbolicLink() ? 'symlink' : 'other',
+      dev: String(targetStat.dev),
+      ino: String(targetStat.ino),
+      mode: String(targetStat.mode),
+      size: String(targetStat.size),
+      mtime_ns: String(targetStat.mtimeNs),
+      ctime_ns: String(targetStat.ctimeNs),
+    };
+  }
+  return fingerprint;
+}
+
+function walkIgnoredEntry(root, repoPath, target, entries, activeTargets) {
+  const normalized = normalizeRepoPath(repoPath);
+  if (!normalized) throw new Error(`unsafe ignored path: ${repoPath}`);
+  if (!within(root, target)) throw new Error(`ignored path escapes workdir: ${repoPath}`);
+  if (Object.keys(entries).length >= MAX_IGNORED_ENTRIES) throw new Error('ignored-state entry limit exceeded');
+  entries[normalized] = ignoredFingerprint(root, normalized, target);
+  const stat = fs.lstatSync(target, { bigint: true });
+  let directory = target;
+  let realDirectory = null;
+  if (stat.isSymbolicLink()) {
+    realDirectory = fs.realpathSync.native(target);
+    if (!within(root, realDirectory)) throw new Error(`ignored symlink escapes workdir: ${repoPath}`);
+    const targetStat = fs.statSync(target, { bigint: true });
+    if (!targetStat.isDirectory()) return;
+    directory = realDirectory;
+  } else if (!stat.isDirectory()) {
+    return;
+  }
+  const identity = fs.realpathSync.native(directory);
+  if (activeTargets.has(identity)) throw new Error(`ignored symlink cycle: ${repoPath}`);
+  const nextActive = new Set(activeTargets);
+  nextActive.add(identity);
+  for (const child of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childPath = `${normalized}/${child.name}`;
+    const childTarget = path.join(directory, child.name);
+    walkIgnoredEntry(root, childPath, childTarget, entries, nextActive);
+  }
 }
 
 export function captureIgnoredState(cwd) {
   const listed = runSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'], { cwd });
-  if (listed.exit !== 0) return { ok: false, error: `cannot list ignored paths: ${listed.stderr}`, entries: {} };
+  const listedDirs = runSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'], { cwd });
+  if (listed.exit !== 0 || listedDirs.exit !== 0) {
+    return { ok: false, error: `cannot list ignored paths: ${listed.stderr || listedDirs.stderr}`, entries: {} };
+  }
+  const roots = [...new Set([
+    ...splitNul(listed.stdout),
+    ...splitNul(listedDirs.stdout).map((entry) => entry.endsWith('/') ? entry.slice(0, -1) : entry),
+  ])].sort();
   const entries = {};
+  const root = path.resolve(cwd);
   try {
-    for (const repoPath of splitNul(listed.stdout).sort()) {
-      entries[repoPath] = ignoredFingerprint(cwd, repoPath);
+    for (const repoPath of roots) {
+      const normalized = normalizeRepoPath(repoPath);
+      if (!normalized) throw new Error(`unsafe ignored path: ${repoPath}`);
+      const target = path.resolve(root, normalized);
+      if (!within(root, target) || !fs.existsSync(target)) throw new Error(`ignored path is missing: ${repoPath}`);
+      if (entries[normalized]) continue;
+      walkIgnoredEntry(root, normalized, target, entries, new Set());
     }
   } catch (err) {
     return { ok: false, error: err.message, entries: {} };
@@ -154,6 +222,129 @@ function ignoredStateSummary(state) {
   };
 }
 
+function metadataFileFingerprint(file, authorities) {
+  if (!fs.existsSync(file)) return { present: false };
+  const stat = fs.lstatSync(file, { bigint: true });
+  if (stat.isSymbolicLink()) {
+    const resolved = fs.realpathSync.native(file);
+    if (!authorities.some((root) => within(root, resolved))) throw new Error(`Git metadata symlink escapes authority: ${file}`);
+  }
+  if (!stat.isFile()) throw new Error(`unsupported Git metadata entry: ${file}`);
+  if (stat.size > BigInt(MAX_GIT_METADATA_FILE)) throw new Error(`Git metadata file too large: ${file}`);
+  const content = fs.readFileSync(file);
+  return {
+    present: true,
+    type: 'file',
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    mode: String(stat.mode),
+    size: String(stat.size),
+    mtime_ns: String(stat.mtimeNs),
+    ctime_ns: String(stat.ctimeNs),
+    sha256: crypto.createHash('sha256').update(content).digest('hex'),
+  };
+}
+
+function gitPath(cwd, name) {
+  const result = runSync('git', ['rev-parse', '--git-path', name], { cwd });
+  if (result.exit !== 0 || !result.stdout.trim()) throw new Error(`cannot resolve Git metadata path ${name}: ${result.stderr}`);
+  return path.resolve(cwd, result.stdout.trim());
+}
+
+function captureMetadataDirectory(directory, authorities, output, prefix, count = { value: 0 }) {
+  if (!fs.existsSync(directory)) return;
+  if (count.value >= 1024) throw new Error(`Git metadata directory entry limit exceeded: ${directory}`);
+  for (const entry of fs.readdirSync(directory).sort()) {
+    count.value += 1;
+    const file = path.join(directory, entry);
+    const stat = fs.lstatSync(file, { bigint: true });
+    const key = `${prefix}/${entry}`;
+    if (stat.isDirectory()) {
+      output[key] = {
+        present: true,
+        type: 'directory',
+        dev: String(stat.dev),
+        ino: String(stat.ino),
+        mode: String(stat.mode),
+      };
+      captureMetadataDirectory(file, authorities, output, key, count);
+    } else {
+      output[key] = metadataFileFingerprint(file, authorities);
+    }
+  }
+}
+
+export function captureGitMetadataState(cwd) {
+  const identityNames = ['--git-dir', '--git-common-dir', '--show-toplevel', '--is-inside-work-tree', '--is-bare-repository'];
+  const identity = {};
+  for (const name of identityNames) {
+    const result = runSync('git', ['rev-parse', name], { cwd });
+    if (result.exit !== 0 || !result.stdout.trim()) return { ok: false, error: `cannot resolve Git identity ${name}: ${result.stderr}`, files: {}, identity: {} };
+    identity[name] = result.stdout.trim();
+  }
+  const root = path.resolve(cwd);
+  const gitDir = path.resolve(cwd, identity['--git-dir']);
+  const commonDir = path.resolve(cwd, identity['--git-common-dir']);
+  const authorities = [root, gitDir, commonDir];
+  const fileNames = ['config', 'config.worktree', 'info/attributes', 'info/exclude', 'objects/info/alternates'];
+  const files = {};
+  try {
+    for (const name of fileNames) {
+      const file = gitPath(cwd, name);
+      if (!authorities.some((authority) => within(authority, file))) throw new Error(`Git metadata path escapes authority: ${name}`);
+      files[path.relative(root, file) || name] = metadataFileFingerprint(file, authorities);
+    }
+    const localConfig = runSync('git', ['config', '--local', '--includes', '--show-origin', '--null', '--list'], { cwd });
+    if (localConfig.exit !== 0) throw new Error(`cannot inspect local Git config: ${localConfig.stderr}`);
+    files['<effective-local-config>'] = {
+      present: true,
+      sha256: crypto.createHash('sha256').update(localConfig.stdout).digest('hex'),
+    };
+    const originPattern = /(?:^|\0)file:([^\0\t\r\n]+)/g;
+    for (const match of localConfig.stdout.matchAll(originPattern)) {
+      const origin = path.resolve(cwd, match[1]);
+      if (!authorities.some((authority) => within(authority, origin))) {
+        throw new Error(`local Git config includes external file: ${match[1]}`);
+      }
+      const key = path.relative(root, origin) || match[1];
+      files[key] = metadataFileFingerprint(origin, authorities);
+    }
+    for (const name of ['hooks', 'info']) {
+      const directory = gitPath(cwd, name);
+      if (!authorities.some((authority) => within(authority, directory))) throw new Error(`Git metadata directory escapes authority: ${name}`);
+      const dirStat = fs.existsSync(directory) ? fs.lstatSync(directory, { bigint: true }) : null;
+      files[`<git-dir>/${name}`] = dirStat ? {
+        present: true,
+        type: dirStat.isDirectory() ? 'directory' : 'other',
+        dev: String(dirStat.dev),
+        ino: String(dirStat.ino),
+        mode: String(dirStat.mode),
+      } : { present: false };
+      if (name === 'hooks' && dirStat?.isDirectory()) captureMetadataDirectory(directory, authorities, files, '<git-dir>/hooks');
+    }
+  } catch (err) {
+    return { ok: false, error: err.message, files: {}, identity };
+  }
+  return { ok: true, error: null, identity, files };
+}
+
+export function compareGitMetadataState(before, after) {
+  if (!before?.ok || !after?.ok) {
+    return {
+      ok: false,
+      error: before?.error ?? after?.error ?? 'Git metadata attestation failed',
+      changes: ['<git-metadata-attestation-error>'],
+    };
+  }
+  const changes = [];
+  if (JSON.stringify(before.identity) !== JSON.stringify(after.identity)) changes.push('<identity>');
+  const keys = [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])].sort();
+  for (const key of keys) {
+    if (JSON.stringify(before.files[key] ?? null) !== JSON.stringify(after.files[key] ?? null)) changes.push(key);
+  }
+  return { ok: changes.length === 0, error: null, changes };
+}
+
 export function scopeCheck(cwd, allowed) {
   const paths = changedPaths(cwd);
   const invalid_patterns = (Array.isArray(allowed) ? allowed : []).filter((pattern) => parseAuthorityPattern(pattern) === null);
@@ -185,25 +376,108 @@ function sameStrings(a, b) {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function successfulToolCalls(events, name) {
-  const calls = events.filter((event) => event.stage === 'call' && event.name === name);
-  const results = new Map(events
-    .filter((event) => event.stage === 'result' && event.name === name)
-    .map((event) => [event.call_id, event]));
-  const successful = calls.filter((call) => call.allowed === true && results.get(call.call_id)?.is_error === false);
+const PHASE_TOOL_NAMES = Object.freeze({
+  implement: new Set(['subagent_codex_implementer']),
+  repair: new Set(['subagent_codex_implementer']),
+  review: new Set(['subagent_claude_reviewer']),
+  rereview: new Set(['subagent_claude_reviewer']),
+  research: new Set(['mcp__literature__search_literature', 'mcp__literature__verify_source']),
+});
+
+function plainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function boundedPayload(value, depth = 0) {
+  if (depth > 8) return false;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return typeof value !== 'string' || value.length <= 32 * 1024;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length <= 256 && value.every((item) => boundedPayload(item, depth + 1));
+  return plainObject(value) && Object.keys(value).length <= 256
+    && Object.keys(value).every((key) => key.length <= 512 && boundedPayload(value[key], depth + 1));
+}
+
+function strictLedger(ledger, phase) {
+  if (!ledger?.ok) return { ok: false, reason: ledger?.error ?? 'TOOL_GUARD_LEDGER_INVALID', calls: [], results: new Map() };
+  if (!Array.isArray(ledger.events) || ledger.events.length === 0) return { ok: false, reason: 'TOOL_GUARD_LEDGER_EMPTY', calls: [], results: new Map() };
+  const allowedNames = PHASE_TOOL_NAMES[phase];
+  if (!allowedNames) return { ok: false, reason: `UNSUPPORTED_TOOL_LEDGER_PHASE:${phase}`, calls: [], results: new Map() };
+  const calls = [];
+  const results = new Map();
+  const callIds = new Set();
+  const callOrdinals = new Map();
+  for (const event of ledger.events) {
+    if (!plainObject(event) || (event.stage !== 'call' && event.stage !== 'result')) return { ok: false, reason: 'MALFORMED_LEDGER_EVENT', calls, results };
+    if (typeof event.name !== 'string' || !allowedNames.has(event.name)) return { ok: false, reason: 'UNEXPECTED_TOOL_NAME', calls, results };
+    if (typeof event.call_id !== 'string' || event.call_id.length === 0 || event.call_id.length > 512) return { ok: false, reason: 'MALFORMED_CALL_ID', calls, results };
+    const allowedKeys = event.stage === 'call'
+      ? new Set(['stage', 'name', 'call_id', 'ordinal', 'allowed', 'arguments'])
+      : new Set(['stage', 'name', 'call_id', 'is_error', ...(event.name.startsWith('mcp__literature__') ? ['payload'] : [])]);
+    if (Object.keys(event).some((key) => !allowedKeys.has(key))) return { ok: false, reason: 'UNKNOWN_LEDGER_EVENT_FIELD', calls, results };
+    if (event.stage === 'call') {
+      if (callIds.has(event.call_id) || results.has(event.call_id)) return { ok: false, reason: 'DUPLICATE_CALL_ID', calls, results };
+      if (!Number.isSafeInteger(event.ordinal) || event.ordinal < 1) return { ok: false, reason: 'MALFORMED_CALL_ORDINAL', calls, results };
+      const expectedOrdinal = (callOrdinals.get(event.name) ?? 0) + 1;
+      if (event.ordinal !== expectedOrdinal) return { ok: false, reason: 'NON_MONOTONIC_CALL_ORDINAL', calls, results };
+      if (typeof event.allowed !== 'boolean' || !plainObject(event.arguments)) return { ok: false, reason: 'MALFORMED_CALL_EVENT', calls, results };
+      if (event.name === 'mcp__literature__search_literature' && event.arguments.query !== undefined && typeof event.arguments.query !== 'string') return { ok: false, reason: 'MALFORMED_MCP_SEARCH_ARGUMENTS', calls, results };
+      if (event.name === 'mcp__literature__verify_source' && (typeof event.arguments.id !== 'string' || event.arguments.id.length === 0)) return { ok: false, reason: 'MALFORMED_MCP_VERIFY_ARGUMENTS', calls, results };
+      callIds.add(event.call_id);
+      callOrdinals.set(event.name, event.ordinal);
+      calls.push(event);
+      continue;
+    }
+    if (results.has(event.call_id)) return { ok: false, reason: 'DUPLICATE_RESULT', calls, results };
+    const call = calls.find((candidate) => candidate.call_id === event.call_id);
+    if (!call) return { ok: false, reason: 'ORPHAN_OR_RESULT_BEFORE_CALL', calls, results };
+    if (call.name !== event.name) return { ok: false, reason: 'RESULT_TOOL_NAME_MISMATCH', calls, results };
+    if (typeof event.is_error !== 'boolean') return { ok: false, reason: 'MALFORMED_RESULT_EVENT', calls, results };
+    if (Object.prototype.hasOwnProperty.call(event, 'payload') && !boundedPayload(event.payload)) return { ok: false, reason: 'MALFORMED_RESULT_PAYLOAD', calls, results };
+    if (event.name.startsWith('mcp__literature__') && event.is_error === false && (!Object.prototype.hasOwnProperty.call(event, 'payload') || !plainObject(event.payload))) {
+      return { ok: false, reason: 'MISSING_MCP_RESULT_PAYLOAD', calls, results };
+    }
+    results.set(event.call_id, event);
+  }
+  if (calls.some((call) => !results.has(call.call_id))) return { ok: false, reason: 'INCOMPLETE_CALL_RESULT_SETTLEMENT', calls, results };
+  return { ok: true, reason: null, calls, results };
+}
+
+function successfulToolCalls(inspected, name) {
+  const calls = inspected.calls.filter((event) => event.name === name);
+  const successful = calls.filter((call) => call.allowed === true && inspected.results.get(call.call_id)?.is_error === false);
   const denied = calls.filter((call) => call.allowed !== true);
-  const incomplete = calls.filter((call) => !results.has(call.call_id));
-  const errored = calls.filter((call) => results.get(call.call_id)?.is_error === true);
+  const incomplete = calls.filter((call) => !inspected.results.has(call.call_id));
+  const errored = calls.filter((call) => inspected.results.get(call.call_id)?.is_error === true);
   return { calls, successful, denied, incomplete, errored };
 }
 
+function searchSourceIds(successfulSearches, results) {
+  const ids = new Set();
+  for (const call of successfulSearches) {
+    const payload = results.get(call.call_id)?.payload;
+    if (!plainObject(payload) || !Array.isArray(payload.sources)) continue;
+    for (const source of payload.sources) {
+      if (plainObject(source) && typeof source.id === 'string' && source.id.length > 0 && source.id.length <= 512) ids.add(source.id);
+    }
+  }
+  return [...ids].sort();
+}
+
+function verifiedPayloadId(payload) {
+  if (!plainObject(payload) || payload.verified !== true) return null;
+  if (typeof payload.id === 'string') return payload.id;
+  if (plainObject(payload.source) && typeof payload.source.id === 'string') return payload.source.id;
+  return null;
+}
+
 export function validatePhaseToolLedger(ledger, phase, evidence = null) {
+  const strict = strictLedger(ledger, phase);
+  if (!strict.ok) return { ok: false, reason: strict.reason, phase, counts: { calls: strict.calls.length, results: strict.results.size } };
   if (!ledger?.ok) {
     return { ok: false, reason: ledger?.error ?? 'TOOL_GUARD_LEDGER_INVALID', phase, counts: {} };
   }
-  const events = ledger.events;
   if (phase === 'implement' || phase === 'repair') {
-    const inspected = successfulToolCalls(events, 'subagent_codex_implementer');
+    const inspected = successfulToolCalls(strict, 'subagent_codex_implementer');
     const ok = inspected.calls.length === 1
       && inspected.successful.length === 1
       && inspected.denied.length === 0
@@ -217,7 +491,7 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
     };
   }
   if (phase === 'review' || phase === 'rereview') {
-    const inspected = successfulToolCalls(events, 'subagent_claude_reviewer');
+    const inspected = successfulToolCalls(strict, 'subagent_claude_reviewer');
     const ok = inspected.calls.length === 1
       && inspected.successful.length === 1
       && inspected.denied.length === 0
@@ -231,22 +505,43 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
     };
   }
   if (phase === 'research') {
-    const search = successfulToolCalls(events, 'mcp__literature__search_literature');
-    const verify = successfulToolCalls(events, 'mcp__literature__verify_source');
-    const verifiedIds = [...new Set(verify.successful
-      .map((call) => call.arguments?.id)
-      .filter((id) => typeof id === 'string' && id.length > 0))].sort();
+    const search = successfulToolCalls(strict, 'mcp__literature__search_literature');
+    const verify = successfulToolCalls(strict, 'mcp__literature__verify_source');
+    const searchedIds = searchSourceIds(search.successful, strict.results);
+    const verificationCounts = new Map();
+    const verifiedIds = [];
+    let malformedVerification = false;
+    for (const call of verify.successful) {
+      const requestedId = call.arguments.id;
+      const returnedId = verifiedPayloadId(strict.results.get(call.call_id)?.payload);
+      if (!searchedIds.includes(requestedId) || returnedId !== requestedId) malformedVerification = true;
+      if (returnedId === requestedId) {
+        verificationCounts.set(returnedId, (verificationCounts.get(returnedId) ?? 0) + 1);
+        if (!verifiedIds.includes(returnedId)) verifiedIds.push(returnedId);
+      }
+    }
+    verifiedIds.sort();
     const evidenceIds = Array.isArray(evidence?.sources)
-      ? [...new Set(evidence.sources.map((source) => source?.id).filter((id) => typeof id === 'string' && id.length > 0))].sort()
+      ? evidence.sources.map((source) => source?.id)
       : [];
-    const everyEvidenceSourceVerified = evidenceIds.length >= 2 && evidenceIds.every((id) => verifiedIds.includes(id));
+    const validEvidenceIds = evidenceIds.length >= 2
+      && evidenceIds.every((id) => typeof id === 'string' && id.length > 0 && searchedIds.includes(id))
+      && new Set(evidenceIds).size === evidenceIds.length;
+    const everyEvidenceSourceVerified = validEvidenceIds
+      && evidenceIds.every((id) => verificationCounts.get(id) === 1);
     const noFailures = search.denied.length === 0
       && search.incomplete.length === 0
       && search.errored.length === 0
       && verify.denied.length === 0
       && verify.incomplete.length === 0
       && verify.errored.length === 0;
-    const ok = search.successful.length >= 1 && verifiedIds.length >= 2 && everyEvidenceSourceVerified && noFailures;
+    const ok = search.successful.length >= 1
+      && searchedIds.length >= 2
+      && verifiedIds.length >= 2
+      && everyEvidenceSourceVerified
+      && !malformedVerification
+      && [...verificationCounts.values()].every((count) => count === 1)
+      && noFailures;
     return {
       ok,
       reason: ok ? null : 'MCP_TOOL_ATTESTATION_INVALID',
@@ -256,10 +551,12 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
         search_successful: search.successful.length,
         verify_calls: verify.calls.length,
         verify_successful: verify.successful.length,
+        searched_sources: searchedIds.length,
         verified_sources: verifiedIds.length,
       },
+      searched_source_ids: searchedIds,
       verified_source_ids: verifiedIds,
-      evidence_source_ids: evidenceIds,
+      evidence_source_ids: [...new Set(evidenceIds)].sort(),
     };
   }
   return { ok: false, reason: `UNSUPPORTED_TOOL_LEDGER_PHASE:${phase}`, phase, counts: {} };
@@ -423,11 +720,18 @@ function hostVerify(cwd, rawTask) {
     env: verify.env ?? {},
   });
   const afterScope = scopeCheck(cwd, allowed);
-  const pass = command.exit === 0 && afterScope.ok;
+  let contentAttestation = null;
+  if (command.exit === 0 && afterScope.ok) contentAttestation = captureContentAttestation(cwd, afterScope.paths);
+  const pass = command.exit === 0 && afterScope.ok && contentAttestation?.ok === true;
   return {
     pass,
-    reason: command.exit !== 0 ? `HOST_VERIFY_EXIT_${command.exit}` : afterScope.ok ? null : `UNAUTHORIZED_WRITE:${afterScope.unauthorized.join(',')}`,
+    reason: command.exit !== 0
+      ? `HOST_VERIFY_EXIT_${command.exit}`
+      : !afterScope.ok
+        ? `UNAUTHORIZED_WRITE:${afterScope.unauthorized.join(',')}`
+        : contentAttestation?.ok ? null : `CONTENT_ATTESTATION_FAILED:${contentAttestation?.error ?? 'unknown'}`,
     scope: afterScope,
+    content_attestation: contentAttestation,
     command: {
       command: verify.command,
       args: verify.args,
@@ -439,7 +743,148 @@ function hostVerify(cwd, rawTask) {
   };
 }
 
-export function commitTask(cwd, taskId, allowed, checkpointHead) {
+function contentHash(file) {
+  const stat = fs.statSync(file, { bigint: true });
+  if (stat.size > BigInt(MAX_CONTENT_FILE)) throw new Error(`authorized content too large: ${file}`);
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(file, 'r');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let offset = 0;
+    for (;;) {
+      const read = fs.readSync(fd, buffer, 0, buffer.length, offset);
+      if (read === 0) break;
+      hash.update(buffer.subarray(0, read));
+      offset += read;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+function gitMode(stat, type) {
+  if (type === 'symlink') return '120000';
+  return (Number(stat.mode) & 0o111) !== 0 ? '100755' : '100644';
+}
+
+export function captureContentAttestation(cwd, paths) {
+  if (!Array.isArray(paths)) return { ok: false, error: 'content attestation paths must be an array', paths: [], entries: {} };
+  const root = path.resolve(cwd);
+  const normalizedPaths = [...new Set(paths)].sort();
+  const entries = {};
+  try {
+    for (const rawPath of normalizedPaths) {
+      const repoPath = normalizeRepoPath(rawPath);
+      if (!repoPath) throw new Error(`unsafe content attestation path: ${rawPath}`);
+      const target = path.resolve(root, repoPath);
+      if (!within(root, target)) throw new Error(`content attestation path escapes workdir: ${repoPath}`);
+      let stat;
+      try { stat = fs.lstatSync(target, { bigint: true }); } catch (err) {
+        if (err.code === 'ENOENT') {
+          entries[repoPath] = { present: false };
+          continue;
+        }
+        throw err;
+      }
+      const type = stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : 'other';
+      if (type === 'other') throw new Error(`unsupported authorized content type: ${repoPath}`);
+      const entry = {
+        present: true,
+        type,
+        mode: String(stat.mode),
+        git_mode: gitMode(stat, type),
+        size: String(stat.size),
+        sha256: type === 'file'
+          ? contentHash(target)
+          : crypto.createHash('sha256').update(fs.readlinkSync(target)).digest('hex'),
+        link: type === 'symlink' ? fs.readlinkSync(target) : null,
+      };
+      const object = runSync('git', ['hash-object', '--no-filters', '--', repoPath], { cwd });
+      if (object.exit !== 0 || !/^[0-9a-f]{40,64}$/.test(object.stdout.trim())) throw new Error(`cannot hash authorized content: ${repoPath}: ${object.stderr}`);
+      entry.git_object_id = object.stdout.trim();
+      entries[repoPath] = entry;
+    }
+  } catch (err) {
+    return { ok: false, error: err.message, paths: normalizedPaths, entries: {} };
+  }
+  return {
+    ok: true,
+    error: null,
+    paths: normalizedPaths,
+    entries,
+    sha256: crypto.createHash('sha256').update(JSON.stringify(Object.entries(entries))).digest('hex'),
+  };
+}
+
+function compareContentAttestations(expected, actual) {
+  if (!expected?.ok || !actual?.ok || JSON.stringify(expected.paths) !== JSON.stringify(actual.paths)) return false;
+  return JSON.stringify(expected.entries) === JSON.stringify(actual.entries);
+}
+
+function indexEntries(cwd, paths) {
+  const entries = {};
+  for (const repoPath of paths) {
+    const result = runSync('git', ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', repoPath], { cwd });
+    if (result.exit !== 0) throw new Error(`cannot inspect staged path ${repoPath}: ${result.stderr}`);
+    const records = splitNul(result.stdout);
+    if (records.length > 1) throw new Error(`staged path has multiple index stages: ${repoPath}`);
+    if (records.length === 0) continue;
+    const tab = records[0].indexOf('\t');
+    const fields = tab < 0 ? [] : records[0].slice(0, tab).split(' ');
+    if (fields.length !== 3 || fields[2] !== '0') throw new Error(`malformed staged index record: ${repoPath}`);
+    entries[repoPath] = { mode: fields[0], object_id: fields[1], path: records[0].slice(tab + 1) };
+  }
+  return entries;
+}
+
+function treeEntries(cwd, head, paths) {
+  const result = runSync('git', ['--literal-pathspecs', 'ls-tree', '-r', '-z', head, '--', ...paths], { cwd });
+  if (result.exit !== 0) throw new Error(`cannot inspect committed content: ${result.stderr}`);
+  const entries = {};
+  for (const record of splitNul(result.stdout)) {
+    const tab = record.indexOf('\t');
+    const fields = tab < 0 ? [] : record.slice(0, tab).split(' ');
+    if (fields.length !== 3) throw new Error('malformed committed tree record');
+    entries[record.slice(tab + 1)] = { mode: fields[0], object_id: fields[2] };
+  }
+  return entries;
+}
+
+function compareIndexToContent(cwd, attestation) {
+  const paths = attestation.paths;
+  const index = indexEntries(cwd, paths);
+  for (const repoPath of paths) {
+    const expected = attestation.entries[repoPath];
+    const actual = index[repoPath];
+    if (!expected.present) {
+      if (actual) return { ok: false, error: `deleted path remains staged: ${repoPath}` };
+      continue;
+    }
+    if (!actual || actual.mode !== expected.git_mode || actual.object_id !== expected.git_object_id) {
+      return { ok: false, error: `staged content or mode differs: ${repoPath}` };
+    }
+  }
+  return { ok: true, error: null };
+}
+
+function compareTreeToContent(cwd, head, attestation) {
+  const tree = treeEntries(cwd, head, attestation.paths);
+  for (const repoPath of attestation.paths) {
+    const expected = attestation.entries[repoPath];
+    const actual = tree[repoPath];
+    if (!expected.present) {
+      if (actual) return { ok: false, error: `deleted path remains committed: ${repoPath}` };
+      continue;
+    }
+    if (!actual || actual.mode !== expected.git_mode || actual.object_id !== expected.git_object_id) {
+      return { ok: false, error: `committed content or mode differs: ${repoPath}` };
+    }
+  }
+  return { ok: true, error: null };
+}
+
+export function commitTask(cwd, taskId, allowed, checkpointHead, expectedContent = null, expectedGitMetadata = null) {
   const actualHead = resolveHead(cwd);
   if (actualHead !== checkpointHead) {
     const err = new Error(`HEAD changed before host checkpoint for ${taskId}: ${actualHead} != ${checkpointHead}`);
@@ -455,6 +900,29 @@ export function commitTask(cwd, taskId, allowed, checkpointHead) {
   }
   if (scope.paths.length === 0) throw new Error(`task ${taskId} produced no change`);
 
+  const content = expectedContent?.ok ? expectedContent : captureContentAttestation(cwd, scope.paths);
+  if (!content.ok || JSON.stringify(content.paths) !== JSON.stringify(scope.paths)) {
+    const err = new Error(`content attestation mismatch before staging for ${taskId}: ${content.error ?? 'path set changed'}`);
+    err.code = 'SPRINT_CONTENT_ATTESTATION';
+    throw err;
+  }
+  const currentContent = captureContentAttestation(cwd, content.paths);
+  if (!compareContentAttestations(content, currentContent)) {
+    const err = new Error(`worktree content changed after host verification for ${taskId}`);
+    err.code = 'SPRINT_CONTENT_ATTESTATION';
+    throw err;
+  }
+  if (expectedGitMetadata) {
+    const currentMetadata = captureGitMetadataState(cwd);
+    const metadataDiff = compareGitMetadataState(expectedGitMetadata, currentMetadata);
+    if (!metadataDiff.ok) {
+      const err = new Error(`Git metadata changed before staging for ${taskId}: ${metadataDiff.changes.join(',')}`);
+      err.code = 'SPRINT_GIT_METADATA_ATTESTATION';
+      err.scope = metadataDiff;
+      throw err;
+    }
+  }
+
   const add = runSync('git', ['--literal-pathspecs', 'add', '-A', '--', ...scope.paths], { cwd });
   if (add.exit !== 0) throw new Error(`git add failed for ${taskId}: ${add.stderr}`);
   const staged = runSync('git', ['diff', '--cached', '--name-only', '-z', '--no-renames'], { cwd });
@@ -468,6 +936,13 @@ export function commitTask(cwd, taskId, allowed, checkpointHead) {
     throw err;
   }
   if (stagedPaths.length === 0) throw new Error(`task ${taskId} produced no staged change`);
+  const stagedContent = compareIndexToContent(cwd, content);
+  if (!stagedContent.ok) {
+    const err = new Error(`staged content attestation failed for ${taskId}: ${stagedContent.error}`);
+    err.code = 'SPRINT_CONTENT_ATTESTATION';
+    err.scope = stagedContent;
+    throw err;
+  }
 
   const commit = runSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', `sprint: ${taskId}`], { cwd });
   if (commit.exit !== 0) throw new Error(`git commit failed for ${taskId}: ${commit.stderr}`);
@@ -489,6 +964,23 @@ export function commitTask(cwd, taskId, allowed, checkpointHead) {
     err.scope = { staged_paths: stagedPaths, committed_paths: committedPaths };
     throw err;
   }
+  const committedContent = compareTreeToContent(cwd, head, content);
+  if (!committedContent.ok) {
+    const err = new Error(`committed content attestation failed for ${taskId}: ${committedContent.error}`);
+    err.code = 'SPRINT_CONTENT_ATTESTATION';
+    err.scope = committedContent;
+    throw err;
+  }
+  if (expectedGitMetadata) {
+    const currentMetadata = captureGitMetadataState(cwd);
+    const metadataDiff = compareGitMetadataState(expectedGitMetadata, currentMetadata);
+    if (!metadataDiff.ok) {
+      const err = new Error(`Git metadata changed after checkpoint for ${taskId}: ${metadataDiff.changes.join(',')}`);
+      err.code = 'SPRINT_GIT_METADATA_ATTESTATION';
+      err.scope = metadataDiff;
+      throw err;
+    }
+  }
   const after = changedPaths(cwd);
   if (after.length !== 0) {
     const err = new Error(`worktree remained dirty after host checkpoint for ${taskId}: ${after.join(',')}`);
@@ -496,7 +988,14 @@ export function commitTask(cwd, taskId, allowed, checkpointHead) {
     err.scope = { paths: after };
     throw err;
   }
-  return { head, parent: checkpointHead, staged_paths: stagedPaths, committed_paths: committedPaths };
+  return {
+    head,
+    parent: checkpointHead,
+    staged_paths: stagedPaths,
+    committed_paths: committedPaths,
+    checkpoint_attestation: true,
+    content_attestation: { ...content, staged: stagedContent, committed: committedContent, ok: true },
+  };
 }
 
 function buildImplementPrompt(rawTask, researchEvidence = null) {
@@ -617,11 +1116,14 @@ async function runResearch({ cwd, task, controlRoot, researchMcp }) {
     });
     const before = changedPaths(cwd);
     const ignoredBefore = captureIgnoredState(cwd);
+    const gitMetadataBefore = captureGitMetadataState(cwd);
     const headBefore = resolveHead(cwd);
     const result = await dshRun({ cwd, patches, prompt: buildResearchPrompt(task), label: `${task.id}/RESEARCH`, timeoutSeconds: 300 });
     const after = changedPaths(cwd);
     const ignoredAfter = captureIgnoredState(cwd);
     const ignoredState = compareIgnoredState(ignoredBefore, ignoredAfter);
+    const gitMetadataAfter = captureGitMetadataState(cwd);
+    const gitMetadataState = compareGitMetadataState(gitMetadataBefore, gitMetadataAfter);
     const headAfter = resolveHead(cwd);
     const parsed = parseResearchReceipt(`${result.stdout}\n${result.stderr}`);
     const ledger = readToolGuardLedger(patches.guardLedger);
@@ -636,13 +1138,17 @@ async function runResearch({ cwd, task, controlRoot, researchMcp }) {
         && toolGuard.ok
         && gitUnchanged
         && ignoredState.ok
+        && gitMetadataState.ok
         && headUnchanged,
       result,
       parsed,
       tool_guard: toolGuard,
       parent: { ...proxy.state },
-      worktree_unchanged: gitUnchanged && ignoredState.ok && headUnchanged,
+      worktree_unchanged: gitUnchanged && ignoredState.ok && gitMetadataState.ok && headUnchanged,
       ignored_state: ignoredState,
+      git_metadata_state: gitMetadataState,
+      git_metadata_before: gitMetadataBefore,
+      git_metadata_after: gitMetadataAfter,
       head_unchanged: headUnchanged,
       head_before: headBefore,
       head_after: headAfter,
@@ -722,12 +1228,40 @@ function reconciliationStopReason(reconciliation) {
   return 'AUTHORIZED_ROLLBACK_FAILED';
 }
 
+export function evaluateFinalAttestations({ final, receipt, gitState, ignoredState, gitMetadataState }) {
+  const content = {
+    ok: final.state !== 'PASS' || (receipt.tasks.length > 0
+      && receipt.tasks.every((task) => task.commit?.content_attestation?.ok === true)),
+    incomplete_tasks: receipt.tasks.filter((task) => task.commit?.content_attestation?.ok !== true).map((task) => task.id),
+  };
+  const checkpoint = {
+    ok: final.state !== 'PASS' || (Object.values(final.tasks).every((task) => task.state === 'PASS')
+      && receipt.tasks.length === Object.keys(final.tasks).length
+      && receipt.tasks.every((task) => task.commit?.checkpoint_attestation === true
+        && task.commit.parent === task.checkpoint_head
+        && sameStrings(task.commit.staged_paths ?? [], task.commit.committed_paths ?? []))),
+  };
+  const all = gitState.ok && ignoredState.ok && gitMetadataState.ok && content.ok && checkpoint.ok;
+  return {
+    git: gitState,
+    ignored: ignoredState,
+    git_metadata: gitMetadataState,
+    content,
+    checkpoint,
+    all,
+    controller_state: final.state === 'PASS' && !all ? 'FAILED' : final.state,
+    clean_worktree: all,
+  };
+}
+
 export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
   preflight();
   assertClean(cwd);
   validateAuthority(spec);
   const sprintIgnoredBaseline = captureIgnoredState(cwd);
   if (!sprintIgnoredBaseline.ok) fail(`cannot capture ignored-state baseline: ${sprintIgnoredBaseline.error}`);
+  const sprintGitMetadataBaseline = captureGitMetadataState(cwd);
+  if (!sprintGitMetadataBaseline.ok) fail(`cannot capture Git metadata baseline: ${sprintGitMetadataBaseline.error}`);
   const requiresResearch = spec.tasks.some((t) => t.research_required === true);
   let mcpInstall = null;
   if (requiresResearch) {
@@ -751,6 +1285,7 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
     workdir: cwd,
     mcp_plugin: mcpInstall,
     ignored_baseline: ignoredStateSummary(sprintIgnoredBaseline),
+    git_metadata_baseline: { ok: true, sha256: crypto.createHash('sha256').update(JSON.stringify(sprintGitMetadataBaseline)).digest('hex') },
     tasks: [],
     checkpoints: [],
   };
@@ -774,12 +1309,18 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
       hardStop = { reason: 'IGNORED_STATE_CAPTURE_FAILED', task_id: taskId, error: ignoredCheckpoint.error };
       break;
     }
+    const gitMetadataCheckpoint = captureGitMetadataState(cwd);
+    if (!gitMetadataCheckpoint.ok) {
+      hardStop = { reason: 'GIT_METADATA_CAPTURE_FAILED', task_id: taskId, error: gitMetadataCheckpoint.error };
+      break;
+    }
     console.log(`\n=== SPRINT TASK ${taskId} mode=${task.mode} ===`);
     const taskReceipt = {
       id: taskId,
       mode: task.mode,
       checkpoint_head: checkpointHead,
       ignored_checkpoint: ignoredStateSummary(ignoredCheckpoint),
+      git_metadata_checkpoint: { ok: true, sha256: crypto.createHash('sha256').update(JSON.stringify(gitMetadataCheckpoint)).digest('hex') },
       ignored_state: null,
       research: null,
       lifecycle: null,
@@ -797,15 +1338,18 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
         parent: research.parent,
         worktree_unchanged: research.worktree_unchanged,
         ignored_state: research.ignored_state,
+        git_metadata_state: research.git_metadata_state,
         head_unchanged: research.head_unchanged,
         exit: research.result.exit,
         duration_ms: research.result.duration_ms,
       };
       if (!research.ok) {
         recordResearch(sprint, taskId, { ok: false, reason: 'RESEARCH_MCP_OR_EVIDENCE_GATE_FAILED' });
-        if (!research.ignored_state.ok || !research.head_unchanged) {
+        if (!research.ignored_state.ok || !research.git_metadata_state.ok || !research.head_unchanged) {
           hardStop = {
-            reason: !research.head_unchanged ? 'HEAD_AUTHORITY_VIOLATION' : 'IGNORED_WORKTREE_MUTATION',
+            reason: !research.head_unchanged
+              ? 'HEAD_AUTHORITY_VIOLATION'
+              : !research.git_metadata_state.ok ? 'GIT_METADATA_MUTATION' : 'IGNORED_WORKTREE_MUTATION',
             task_id: taskId,
             research: taskReceipt.research,
           };
@@ -834,11 +1378,14 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
     taskReceipt.lifecycle = await runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, researchEvidence });
     const ignoredAfterLifecycle = captureIgnoredState(cwd);
     taskReceipt.ignored_state = compareIgnoredState(ignoredCheckpoint, ignoredAfterLifecycle);
-    if (!taskReceipt.ignored_state.ok) {
+    const gitMetadataAfterLifecycle = captureGitMetadataState(cwd);
+    taskReceipt.git_metadata_state = compareGitMetadataState(sprintGitMetadataBaseline, gitMetadataAfterLifecycle);
+    if (!taskReceipt.ignored_state.ok || !taskReceipt.git_metadata_state.ok) {
       hardStop = {
-        reason: 'IGNORED_WORKTREE_MUTATION',
+        reason: !taskReceipt.git_metadata_state.ok ? 'GIT_METADATA_MUTATION' : 'IGNORED_WORKTREE_MUTATION',
         task_id: taskId,
         ignored_state: taskReceipt.ignored_state,
+        git_metadata_state: taskReceipt.git_metadata_state,
       };
       receipt.tasks.push(taskReceipt);
       receipt.checkpoints.push(checkpoint(sprint));
@@ -849,7 +1396,15 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
     const current = sprint.tasks[taskId];
     if (current.state === 'PASS') {
       try {
-        taskReceipt.commit = commitTask(cwd, taskId, task.authority?.write ?? [], checkpointHead);
+        const verifyPhase = [...(taskReceipt.lifecycle?.phases ?? [])].reverse().find((phase) => phase.phase === 'HOST_VERIFY' || phase.phase === 'HOST_RETEST');
+        taskReceipt.commit = commitTask(
+          cwd,
+          taskId,
+          task.authority?.write ?? [],
+          checkpointHead,
+          verifyPhase?.content_attestation ?? null,
+          sprintGitMetadataBaseline,
+        );
       } catch (err) {
         taskReceipt.commit_error = {
           code: err.code ?? 'HOST_COMMIT_CHECKPOINT_FAILED',
@@ -863,6 +1418,10 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
               ? 'HEAD_AUTHORITY_VIOLATION'
               : err.code === 'SPRINT_COMMIT_ATTESTATION'
                 ? 'HOST_COMMIT_ATTESTATION_FAILED'
+                : err.code === 'SPRINT_CONTENT_ATTESTATION'
+                  ? 'HOST_CONTENT_ATTESTATION_FAILED'
+                  : err.code === 'SPRINT_GIT_METADATA_ATTESTATION'
+                    ? 'GIT_METADATA_MUTATION'
                 : 'HOST_COMMIT_CHECKPOINT_FAILED',
           task_id: taskId,
           commit_error: taskReceipt.commit_error,
@@ -889,14 +1448,35 @@ export async function runLiveSprint({ spec, cwd, receiptPath, researchMcp }) {
   const gitStatus = runSync('git', ['status', '--porcelain'], { cwd });
   const finalIgnored = captureIgnoredState(cwd);
   const ignoredFinalState = compareIgnoredState(sprintIgnoredBaseline, finalIgnored);
+  const finalGitMetadata = captureGitMetadataState(cwd);
+  const gitMetadataFinalState = compareGitMetadataState(sprintGitMetadataBaseline, finalGitMetadata);
+  const finalGitState = {
+    ok: gitStatus.exit === 0 && gitStatus.stdout.trim() === '',
+    paths: gitStatus.exit === 0 ? gitStatus.stdout.trim().split(/\r?\n/).filter(Boolean) : ['<git-status-error>'],
+    error: gitStatus.exit === 0 ? null : gitStatus.stderr,
+  };
+  const finalAttestation = evaluateFinalAttestations({
+    final,
+    receipt,
+    gitState: finalGitState,
+    ignoredState: ignoredFinalState,
+    gitMetadataState: gitMetadataFinalState,
+  });
+  const allFinalAttestations = finalAttestation.all;
+  if (!hardStop && !allFinalAttestations) hardStop = { reason: 'FINAL_ATTESTATION_FAILED', final_attestation: finalAttestation };
   receipt.finished_at = new Date().toISOString();
   receipt.final = final;
-  receipt.controller_state = hardStop ? 'FAILED' : final.state;
+  receipt.controller_state = hardStop ? 'FAILED' : finalAttestation.controller_state;
   receipt.controller_terminal_reason = hardStop?.reason ?? final.terminal_reason;
   receipt.hard_stop = hardStop;
   receipt.ignored_final = ignoredStateSummary(finalIgnored);
   receipt.ignored_state_unchanged = ignoredFinalState;
-  receipt.clean_worktree = gitStatus.exit === 0 && gitStatus.stdout.trim() === '' && ignoredFinalState.ok;
+  receipt.git_final = finalGitState;
+  receipt.git_metadata_final = gitMetadataFinalState;
+  receipt.content_final = finalAttestation.content;
+  receipt.checkpoint_final = finalAttestation.checkpoint;
+  receipt.final_attestation = finalAttestation;
+  receipt.clean_worktree = allFinalAttestations;
   if (receiptPath) writeJson(receiptPath, receipt);
 
   console.log('\n==========================================');

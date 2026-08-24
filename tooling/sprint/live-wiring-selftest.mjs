@@ -12,9 +12,13 @@ import {
   reconcileNonPassWorktree,
   captureIgnoredState,
   compareIgnoredState,
+  captureGitMetadataState,
+  compareGitMetadataState,
+  captureContentAttestation,
   validatePhaseToolLedger,
   commitTask,
   resolveHead,
+  evaluateFinalAttestations,
 } from './live-sprint.mjs';
 
 function runGit(cwd, args) {
@@ -147,16 +151,75 @@ test('tool guard admits exactly one successful Codex call', () => {
 test('research evidence must be backed by successful MCP search and distinct verified source calls', () => {
   const events = [
     { stage: 'call', name: 'mcp__literature__search_literature', call_id: 's1', ordinal: 1, allowed: true, arguments: { query: 'PIT' } },
-    { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false },
+    { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false, payload: { sources: [{ id: 'A' }, { id: 'B' }] } },
     { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v1', ordinal: 1, allowed: true, arguments: { id: 'A' } },
-    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v1', is_error: false },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v1', is_error: false, payload: { id: 'A', verified: true } },
     { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v2', ordinal: 2, allowed: true, arguments: { id: 'B' } },
-    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v2', is_error: false },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v2', is_error: false, payload: { id: 'B', verified: true } },
   ];
   const ledger = { ok: true, events };
   assert.equal(validatePhaseToolLedger(ledger, 'research', { sources: [{ id: 'A' }, { id: 'B' }] }).ok, true);
   assert.equal(validatePhaseToolLedger(ledger, 'research', { sources: [{ id: 'A' }, { id: 'C' }] }).ok, false);
   assert.equal(validatePhaseToolLedger({ ok: true, events: events.filter((event) => event.call_id !== 'v2') }, 'research', { sources: [{ id: 'A' }, { id: 'B' }] }).ok, false);
+});
+
+test('strict ledger correlation rejects every duplicate, malformed, orphan, reordered, and incomplete settlement', () => {
+  const call = { stage: 'call', name: 'subagent_codex_implementer', call_id: 'c1', ordinal: 1, allowed: true, arguments: { description: 'one' } };
+  const success = { stage: 'result', name: 'subagent_codex_implementer', call_id: 'c1', is_error: false };
+  const error = { stage: 'result', name: 'subagent_codex_implementer', call_id: 'c1', is_error: true };
+  const valid = () => validatePhaseToolLedger({ ok: true, events: [call, success] }, 'implement');
+  assert.equal(valid().ok, true);
+  for (const events of [
+    [call, error, success], // duplicate error -> success overwrite
+    [call, success, error], // duplicate success -> error overwrite
+    [{ ...call, call_id: '' }, success],
+    [{ ...call, call_id: 42 }, success],
+    [call, { ...success, call_id: '' }],
+    [call, { ...call, call_id: 'c1' }, success],
+    [{ ...success, call_id: 'orphan' }, call],
+    [success, call],
+    [call, { ...success, name: 'subagent_claude_reviewer' }],
+    [{ ...call, ordinal: 0 }, success],
+    [{ ...call, ordinal: '1' }, success],
+    [{ ...call, ordinal: 2 }, success],
+    [{ ...call, hostile: true }, success],
+    [call],
+    [call, { ...success, is_error: 'false' }],
+  ]) {
+    assert.equal(validatePhaseToolLedger({ ok: true, events }, 'implement').ok, false, JSON.stringify(events));
+  }
+  assert.equal(validatePhaseToolLedger({ ok: true, events: [call, success, { stage: 'call', name: 'subagent_codex_implementer', call_id: 'c2', ordinal: 2, allowed: false, arguments: { description: 'denied' } }, { ...error, call_id: 'c2' }] }, 'implement').ok, false);
+});
+
+function researchLedger({ searchPayload = { sources: [{ id: 'A' }, { id: 'B' }] }, verifyA = { id: 'A', verified: true }, verifyB = { id: 'B', verified: true }, verifyBError = false } = {}) {
+  return { ok: true, events: [
+    { stage: 'call', name: 'mcp__literature__search_literature', call_id: 's1', ordinal: 1, allowed: true, arguments: { query: 'PIT' } },
+    { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false, payload: searchPayload },
+    { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v1', ordinal: 1, allowed: true, arguments: { id: 'A' } },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v1', is_error: false, payload: verifyA },
+    { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v2', ordinal: 2, allowed: true, arguments: { id: 'B' } },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v2', is_error: verifyBError, ...(verifyBError ? {} : { payload: verifyB }) },
+  ] };
+}
+
+test('MCP evidence binding rejects fabricated, negative, mismatched, malformed, absent, duplicate, and incomplete verification', () => {
+  const evidence = { sources: [{ id: 'A' }, { id: 'B' }] };
+  assert.equal(validatePhaseToolLedger(researchLedger(), 'research', evidence).ok, true);
+  assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { sources: [{ id: 'A' }, { id: 'B' }] }, verifyA: { id: 'FAB-A', verified: true }, verifyB: { id: 'FAB-B', verified: true } }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: { id: 'A', verified: false } }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: { id: 'B', verified: true } }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: 'malformed' }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { query: 'PIT' } }), 'research', evidence).ok, false);
+  const duplicate = researchLedger();
+  duplicate.events.splice(4, 0,
+    { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v3', ordinal: 3, allowed: true, arguments: { id: 'A' } },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v3', is_error: false, payload: { id: 'A', verified: true } });
+  assert.equal(validatePhaseToolLedger(duplicate, 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ verifyBError: true }), 'research', evidence).ok, false);
+  const incomplete = researchLedger();
+  incomplete.events.pop();
+  assert.equal(validatePhaseToolLedger(incomplete, 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger(), 'research', { sources: [{ id: 'A' }, { id: 'A' }] }).ok, false);
 });
 
 test('gate parsers fail closed on ambiguity', () => {
@@ -195,7 +258,143 @@ test('ignored workspace mutation is detected even when Git porcelain stays clean
     fs.writeFileSync(path.join(cwd, 'ignored/new.txt'), 'new\n');
     const secondDiff = compareIgnoredState(second, captureIgnoredState(cwd));
     assert.equal(secondDiff.ok, false);
-    assert.deepEqual(secondDiff.changes, ['ignored/new.txt']);
+    assert.deepEqual(secondDiff.changes, ['ignored', 'ignored/new.txt']);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('ignored empty directories, internal symlinks, and external symlink targets fail closed and remain inspectable', () => {
+  const cwd = createReconciliationRepo();
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-external-'));
+  try {
+    const before = captureIgnoredState(cwd);
+    fs.mkdirSync(path.join(cwd, 'ignored/empty'), { recursive: true });
+    const created = compareIgnoredState(before, captureIgnoredState(cwd));
+    assert.equal(created.ok, false);
+    assert.ok(created.changes.includes('ignored/empty'));
+    fs.rmdirSync(path.join(cwd, 'ignored/empty'));
+    const deleted = compareIgnoredState(before, captureIgnoredState(cwd));
+    assert.equal(deleted.ok, true);
+
+    fs.mkdirSync(path.join(cwd, 'ignored/target'), { recursive: true });
+    fs.mkdirSync(path.join(cwd, 'ignored/target2'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'ignored/target/reachable.txt'), 'one\n');
+    fs.writeFileSync(path.join(cwd, 'ignored/target2/reachable.txt'), 'two\n');
+    fs.symlinkSync('target', path.join(cwd, 'ignored/link'));
+    const symlinkBaseline = captureIgnoredState(cwd);
+    fs.writeFileSync(path.join(cwd, 'ignored/target/reachable.txt'), 'mutated\n');
+    assert.equal(compareIgnoredState(symlinkBaseline, captureIgnoredState(cwd)).ok, false);
+    fs.unlinkSync(path.join(cwd, 'ignored/link'));
+    fs.symlinkSync('target2', path.join(cwd, 'ignored/link'));
+    assert.equal(compareIgnoredState(symlinkBaseline, captureIgnoredState(cwd)).ok, false);
+
+    fs.writeFileSync(path.join(external, 'secret.txt'), 'outside\n');
+    fs.symlinkSync(path.join(external, 'secret.txt'), path.join(cwd, 'ignored/external-link'));
+    const externalState = captureIgnoredState(cwd);
+    assert.equal(externalState.ok, false);
+    assert.match(externalState.error, /escapes workdir/i);
+    assert.equal(fs.readFileSync(path.join(external, 'secret.txt'), 'utf8'), 'outside\n');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test('Git config, include, and filter metadata mutation is separately attested', () => {
+  const cwd = createReconciliationRepo();
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-config-'));
+  try {
+    const before = captureGitMetadataState(cwd);
+    assert.equal(before.ok, true, JSON.stringify(before));
+    fs.appendFileSync(path.join(cwd, '.git/config'), '\n[filter "late"]\n\tclean = tr a-z A-Z\n');
+    const after = captureGitMetadataState(cwd);
+    assert.equal(compareGitMetadataState(before, after).ok, false);
+    fs.writeFileSync(path.join(external, 'included.config'), '[core]\n\thooksPath = /tmp\n');
+    runGit(cwd, ['config', '--local', 'include.path', path.join(external, 'included.config')]);
+    const externalInclude = captureGitMetadataState(cwd);
+    assert.equal(externalInclude.ok, false);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+function createFilterRepo() {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-filter-'));
+  runGit(cwd, ['init', '-q']);
+  runGit(cwd, ['config', 'user.email', 'smokestack-test@example.invalid']);
+  runGit(cwd, ['config', 'user.name', 'Smokestack Test']);
+  runGit(cwd, ['config', 'filter.poison.clean', "sed 's/verified-good/poisoned/g'"]);
+  runGit(cwd, ['config', 'filter.poison.smudge', 'cat']);
+  fs.writeFileSync(path.join(cwd, '.gitattributes'), 'tracked.txt filter=poison\n');
+  fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'baseline\n');
+  runGit(cwd, ['add', '.']);
+  runGit(cwd, ['commit', '-qm', 'baseline']);
+  return cwd;
+}
+
+test('malicious clean filter cannot stage poisoned content after host verified verified-good', () => {
+  const cwd = createFilterRepo();
+  try {
+    fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'verified-good\n');
+    const verified = captureContentAttestation(cwd, ['tracked.txt']);
+    const metadata = captureGitMetadataState(cwd);
+    assert.equal(verified.ok, true, JSON.stringify(verified));
+    assert.throws(
+      () => commitTask(cwd, 'FILTER_ATTACK', ['tracked.txt'], resolveHead(cwd), verified, metadata),
+      (err) => err?.code === 'SPRINT_CONTENT_ATTESTATION',
+    );
+    assert.equal(runGit(cwd, ['show', ':tracked.txt']), 'poisoned');
+    assert.equal(runGit(cwd, ['show', 'HEAD:tracked.txt']), 'baseline');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('content attestation binds mode-only changes and final PASS truth', () => {
+  const cwd = createReconciliationRepo();
+  try {
+    const checkpointHead = resolveHead(cwd);
+    fs.chmodSync(path.join(cwd, 'experiments/qualification/tracked.txt'), 0o755);
+    const verified = captureContentAttestation(cwd, ['experiments/qualification/tracked.txt']);
+    const committed = commitTask(cwd, 'MODE_CHANGE', ['experiments/qualification/tracked.txt'], checkpointHead, verified, captureGitMetadataState(cwd));
+    assert.equal(committed.content_attestation.ok, true);
+    assert.equal(committed.content_attestation.entries['experiments/qualification/tracked.txt'].git_mode, '100755');
+    assert.deepEqual(runGit(cwd, ['diff-tree', '--no-commit-id', '--name-only', '-r', checkpointHead, committed.head]), 'experiments/qualification/tracked.txt');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+
+  const final = { state: 'PASS', tasks: { A: { state: 'PASS' } } };
+  const receipt = { tasks: [{
+    id: 'A', checkpoint_head: 'parent',
+    commit: { checkpoint_attestation: true, parent: 'parent', staged_paths: ['a'], committed_paths: ['a'], content_attestation: { ok: true } },
+  }] };
+  const good = { ok: true, changes: [] };
+  const badIgnored = { ok: false, changes: ['ignored/final'] };
+  const verdict = evaluateFinalAttestations({ final, receipt, gitState: good, ignoredState: badIgnored, gitMetadataState: good });
+  assert.equal(verdict.controller_state, 'FAILED');
+  assert.equal(verdict.clean_worktree, false);
+  assert.equal(verdict.all, false);
+});
+
+test('a final ignored-state mutation forces FAILED controller truth after the last PASS task', () => {
+  const cwd = createReconciliationRepo();
+  try {
+    const baseline = captureIgnoredState(cwd);
+    fs.writeFileSync(path.join(cwd, 'ignored/final-after-task.txt'), 'late mutation\n');
+    const finalIgnored = compareIgnoredState(baseline, captureIgnoredState(cwd));
+    assert.equal(finalIgnored.ok, false);
+    const final = { state: 'PASS', tasks: { A: { state: 'PASS' } } };
+    const receipt = { tasks: [{
+      id: 'A', checkpoint_head: 'parent',
+      commit: { checkpoint_attestation: true, parent: 'parent', staged_paths: ['a'], committed_paths: ['a'], content_attestation: { ok: true } },
+    }] };
+    const good = { ok: true, changes: [] };
+    const verdict = evaluateFinalAttestations({ final, receipt, gitState: good, ignoredState: finalIgnored, gitMetadataState: good });
+    assert.equal(verdict.controller_state, 'FAILED');
+    assert.equal(verdict.clean_worktree, false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

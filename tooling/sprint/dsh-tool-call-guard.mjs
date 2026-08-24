@@ -20,11 +20,57 @@ function appendLedger(file, event) {
 }
 
 function safeArguments(exec) {
-  if (exec.name.startsWith('mcp__literature__')) return exec.arguments;
+  if (exec.name === 'mcp__literature__search_literature') {
+    return typeof exec.arguments?.query === 'string'
+      ? { query: exec.arguments.query.slice(0, MAX_RESULT_TEXT) }
+      : {};
+  }
+  if (exec.name === 'mcp__literature__verify_source') {
+    return typeof exec.arguments?.id === 'string'
+      ? { id: exec.arguments.id.slice(0, 512) }
+      : {};
+  }
   const description = exec.arguments && typeof exec.arguments === 'object'
     ? exec.arguments.description
     : undefined;
   return typeof description === 'string' ? { description } : {};
+}
+
+const MAX_RESULT_TEXT = 32 * 1024;
+
+function boundedJson(value, depth = 0) {
+  if (depth > 6) return '[depth-limit]';
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return typeof value === 'string' && value.length > MAX_RESULT_TEXT
+      ? value.slice(0, MAX_RESULT_TEXT)
+      : value;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.slice(0, 128).map((item) => boundedJson(item, depth + 1));
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().slice(0, 128)
+      .map((key) => [key, boundedJson(value[key], depth + 1)]));
+  }
+  return null;
+}
+
+function resultPayload(exec, result) {
+  if (!exec.name.startsWith('mcp__literature__')) return undefined;
+  const candidates = [];
+  if (result?.structuredContent && typeof result.structuredContent === 'object') {
+    candidates.push(result.structuredContent);
+  }
+  if (Array.isArray(result?.content)) {
+    for (const item of result.content) {
+      if (item?.type !== 'text' || typeof item.text !== 'string') continue;
+      if (item.text.length > MAX_RESULT_TEXT) return { malformed: true };
+      try { candidates.push(JSON.parse(item.text)); } catch { return { malformed: true }; }
+    }
+  }
+  if (candidates.length !== 1 || !candidates[0] || typeof candidates[0] !== 'object' || Array.isArray(candidates[0])) {
+    return { malformed: true };
+  }
+  return boundedJson(candidates[0]);
 }
 
 export function apply(ctx) {
@@ -58,7 +104,7 @@ export function apply(ctx) {
     appendLedger(ledger, {
       stage: 'call',
       name: exec.name,
-      call_id: String(exec.callId),
+      call_id: exec.callId,
       ordinal,
       allowed,
       arguments: safeArguments(exec),
@@ -73,8 +119,9 @@ export function apply(ctx) {
     appendLedger(ledger, {
       stage: 'result',
       name: exec.name,
-      call_id: String(exec.callId),
-      is_error: result.isError === true,
+      call_id: exec.callId,
+      is_error: result?.isError,
+      payload: resultPayload(exec, result),
     });
   });
 }
