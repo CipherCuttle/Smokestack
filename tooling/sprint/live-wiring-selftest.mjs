@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { apply as applyToolCallGuard } from './dsh-tool-call-guard.mjs';
-import { writeDshPatches, readToolGuardLedger, parseReviewGate, parseResearchReceipt } from './dsh-runtime.mjs';
+import { runAsync, writeDshPatches, readToolGuardTranscript, parseReviewGate, parseResearchReceipt } from './dsh-runtime.mjs';
 import {
   changedPaths,
   isAuthorizedPath,
@@ -46,7 +46,8 @@ function createReconciliationRepo() {
 
 function guardHarness({ limits = {}, observe = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-tool-guard-'));
-  const ledger = path.join(root, 'ledger.jsonl');
+  const transcriptFile = path.join(root, 'trusted-transcript.jsonl');
+  const transcriptFd = fs.openSync(transcriptFile, 'w');
   let guard = null;
   let resultObserver = null;
   const ctx = {
@@ -62,18 +63,18 @@ function guardHarness({ limits = {}, observe = [] } = {}) {
     },
   };
   const previous = {
-    ledger: process.env.SMOKESTACK_TOOL_GUARD_LEDGER,
+    fd: process.env.DSH_SMOKESTACK_TOOL_GUARD_FD,
     limits: process.env.SMOKESTACK_TOOL_GUARD_LIMITS,
     observe: process.env.SMOKESTACK_TOOL_GUARD_OBSERVE,
   };
-  process.env.SMOKESTACK_TOOL_GUARD_LEDGER = ledger;
+  process.env.DSH_SMOKESTACK_TOOL_GUARD_FD = String(transcriptFd);
   process.env.SMOKESTACK_TOOL_GUARD_LIMITS = JSON.stringify(limits);
   process.env.SMOKESTACK_TOOL_GUARD_OBSERVE = JSON.stringify(observe);
   try {
     applyToolCallGuard(ctx);
   } finally {
-    if (previous.ledger === undefined) delete process.env.SMOKESTACK_TOOL_GUARD_LEDGER;
-    else process.env.SMOKESTACK_TOOL_GUARD_LEDGER = previous.ledger;
+    if (previous.fd === undefined) delete process.env.DSH_SMOKESTACK_TOOL_GUARD_FD;
+    else process.env.DSH_SMOKESTACK_TOOL_GUARD_FD = previous.fd;
     if (previous.limits === undefined) delete process.env.SMOKESTACK_TOOL_GUARD_LIMITS;
     else process.env.SMOKESTACK_TOOL_GUARD_LIMITS = previous.limits;
     if (previous.observe === undefined) delete process.env.SMOKESTACK_TOOL_GUARD_OBSERVE;
@@ -81,10 +82,10 @@ function guardHarness({ limits = {}, observe = [] } = {}) {
   }
   if (!guard || !resultObserver) throw new Error('tool guard did not register expected hooks');
   return {
-    ledger,
+    transcriptFile,
     guard,
     resultObserver,
-    cleanup() { fs.rmSync(root, { recursive: true, force: true }); },
+    cleanup() { fs.closeSync(transcriptFd); fs.rmSync(root, { recursive: true, force: true }); },
   };
 }
 
@@ -106,6 +107,7 @@ test('role patches isolate capabilities and install the monotonic tool guard', (
   assert.doesNotMatch(implementRole, /dsh-mcp-client/);
   assert.doesNotMatch(implementRole, /tool-subagent-codex-implementer/);
   assert.equal(implement.guardLimits.subagent_codex_implementer, 1);
+  assert.equal(Object.hasOwn(implement, 'guardLedger'), false);
 
   const review = writeDshPatches({ controlDir: path.join(root, 'review'), port: 12345, phase: 'review' });
   const reviewRole = fs.readFileSync(review.role, 'utf8');
@@ -125,11 +127,11 @@ test('tool guard mechanically denies a second Codex call and the host rejects th
     harness.resultObserver(first, { isError: false });
     assert.match(harness.guard(second), /call ceiling exceeded/);
     harness.resultObserver(second, { isError: true });
-    const ledger = readToolGuardLedger(harness.ledger);
+    const ledger = readToolGuardTranscript(fs.readFileSync(harness.transcriptFile, 'utf8'));
     const gate = validatePhaseToolLedger(ledger, 'implement');
     assert.equal(gate.ok, false);
     assert.deepEqual(gate.counts, { calls: 2, successful: 1, denied: 1 });
-    const raw = fs.readFileSync(harness.ledger, 'utf8');
+    const raw = fs.readFileSync(harness.transcriptFile, 'utf8');
     assert.doesNotMatch(raw, /not logged/);
   } finally {
     harness.cleanup();
@@ -142,20 +144,101 @@ test('tool guard admits exactly one successful Codex call', () => {
     const exec = { name: 'subagent_codex_implementer', callId: 'codex-1', arguments: { description: 'one' } };
     assert.equal(harness.guard(exec), undefined);
     harness.resultObserver(exec, { isError: false });
-    assert.equal(validatePhaseToolLedger(readToolGuardLedger(harness.ledger), 'implement').ok, true);
+    assert.equal(validatePhaseToolLedger(readToolGuardTranscript(fs.readFileSync(harness.transcriptFile, 'utf8')), 'implement').ok, true);
   } finally {
     harness.cleanup();
+  }
+});
+
+function trustedGuardProbeScript({ secondCall = false } = {}) {
+  const guardUrl = new URL('./dsh-tool-call-guard.mjs', import.meta.url).href;
+  return `
+    import fs from 'node:fs';
+    const { apply } = await import(${JSON.stringify(guardUrl)});
+    let guard;
+    let resultObserver;
+    apply({
+      tools: { guard(fn) { guard = fn; } },
+      on(name, fn) { if (name === 'tools/result') resultObserver = fn; },
+    });
+    const first = { name: 'subagent_codex_implementer', callId: 'c1', arguments: { description: 'first' } };
+    guard(first);
+    resultObserver(first, { isError: false });
+    ${secondCall ? `
+      const second = { name: 'subagent_codex_implementer', callId: 'c2', arguments: { description: 'second' } };
+      guard(second);
+      resultObserver(second, { isError: true });
+      if (process.env.LEGACY_LEDGER_PATH) fs.writeFileSync(process.env.LEGACY_LEDGER_PATH, '{"stage":"call","name":"subagent_codex_implementer","call_id":"c1","ordinal":1,"allowed":true,"arguments":{"description":"first"}}\\n{"stage":"result","name":"subagent_codex_implementer","call_id":"c1","is_error":false}\\n');
+    ` : ''}
+    process.stdout.write('forged stdout is not authority\\n');
+  `;
+}
+
+test('host-owned fd transcript cannot be truncated or forged by model-facing output', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-trusted-channel-'));
+  const legacyLedger = path.join(root, 'legacy-ledger.jsonl');
+  try {
+    const legitimate = await runAsync(process.execPath, ['--input-type=module', '-e', trustedGuardProbeScript()], {
+      trustedChannel: true,
+      env: {
+        DSH_SMOKESTACK_TOOL_GUARD_FD: '3',
+        SMOKESTACK_TOOL_GUARD_LIMITS: JSON.stringify({ subagent_codex_implementer: 1 }),
+        SMOKESTACK_TOOL_GUARD_OBSERVE: '[]',
+      },
+      label: 'trusted-channel-legitimate',
+    });
+    const legitimateLedger = readToolGuardTranscript({ data: legitimate.trusted_transcript, complete: legitimate.trusted_transcript_complete });
+    assert.equal(legitimate.trusted_transcript_complete, true);
+    assert.equal(validatePhaseToolLedger(legitimateLedger, 'implement').ok, true);
+    assert.match(legitimate.stdout, /not authority/);
+
+    const attacked = await runAsync(process.execPath, ['--input-type=module', '-e', trustedGuardProbeScript({ secondCall: true })], {
+      trustedChannel: true,
+      env: {
+        DSH_SMOKESTACK_TOOL_GUARD_FD: '3',
+        SMOKESTACK_TOOL_GUARD_LIMITS: JSON.stringify({ subagent_codex_implementer: 1 }),
+        SMOKESTACK_TOOL_GUARD_OBSERVE: '[]',
+        LEGACY_LEDGER_PATH: legacyLedger,
+      },
+      label: 'trusted-channel-denied-second-call',
+    });
+    const attackedLedger = readToolGuardTranscript({ data: attacked.trusted_transcript, complete: attacked.trusted_transcript_complete });
+    const attackedGate = validatePhaseToolLedger(attackedLedger, 'implement');
+    assert.equal(attackedGate.ok, false);
+    assert.deepEqual(attackedGate.counts, { calls: 2, successful: 1, denied: 1 });
+    assert.equal(fs.readFileSync(legacyLedger, 'utf8').split('\n').filter(Boolean).length, 2);
+    assert.equal(attackedLedger.events.length, 4);
+
+    const forgedStdout = await runAsync(process.execPath, ['-e', "process.stdout.write('{\\\"stage\\\":\\\"call\\\"}\\n')"], {
+      trustedChannel: true,
+      env: { DSH_SMOKESTACK_TOOL_GUARD_FD: '3' },
+      label: 'trusted-channel-stdout-forge',
+    });
+    assert.match(forgedStdout.stdout, /stage/);
+    assert.equal(readToolGuardTranscript({ data: forgedStdout.trusted_transcript, complete: forgedStdout.trusted_transcript_complete }).ok, false);
+    assert.equal(validatePhaseToolLedger(readToolGuardTranscript({ data: forgedStdout.trusted_transcript, complete: forgedStdout.trusted_transcript_complete }), 'implement').ok, false);
+
+    assert.equal(readToolGuardTranscript('').ok, false);
+    assert.equal(readToolGuardTranscript('{"stage":"call"}').ok, false);
+    assert.equal(readToolGuardTranscript('{"stage":"call"}\nnot-json\n').ok, false);
+    const call = { stage: 'call', name: 'subagent_codex_implementer', call_id: 'c1', ordinal: 1, allowed: true, arguments: { description: 'one' } };
+    const result = { stage: 'result', name: 'subagent_codex_implementer', call_id: 'c1', is_error: false };
+    const duplicate = readToolGuardTranscript(`${JSON.stringify(call)}\n${JSON.stringify(result)}\n${JSON.stringify(result)}\n`);
+    assert.equal(validatePhaseToolLedger(duplicate, 'implement').ok, false);
+    assert.equal(readToolGuardTranscript({ data: `${JSON.stringify(call)}\n${JSON.stringify(result)}\n`, complete: false }).ok, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('research evidence must be backed by successful MCP search and distinct verified source calls', () => {
   const events = [
     { stage: 'call', name: 'mcp__literature__search_literature', call_id: 's1', ordinal: 1, allowed: true, arguments: { query: 'PIT' } },
-    { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false, payload: { sources: [{ id: 'A' }, { id: 'B' }] } },
+    { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false, payload: { sources: [{ id: 'A', url: 'fixture://literature/A' }, { id: 'B', url: 'fixture://literature/B' }] } },
     { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v1', ordinal: 1, allowed: true, arguments: { id: 'A' } },
-    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v1', is_error: false, payload: { id: 'A', verified: true } },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v1', is_error: false, payload: { id: 'A', url: 'fixture://literature/A', verified: true } },
     { stage: 'call', name: 'mcp__literature__verify_source', call_id: 'v2', ordinal: 2, allowed: true, arguments: { id: 'B' } },
-    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v2', is_error: false, payload: { id: 'B', verified: true } },
+    { stage: 'result', name: 'mcp__literature__verify_source', call_id: 'v2', is_error: false, payload: { id: 'B', url: 'fixture://literature/B', verified: true } },
   ];
   const ledger = { ok: true, events };
   assert.equal(validatePhaseToolLedger(ledger, 'research', { sources: [{ id: 'A' }, { id: 'B' }] }).ok, true);
@@ -191,7 +274,7 @@ test('strict ledger correlation rejects every duplicate, malformed, orphan, reor
   assert.equal(validatePhaseToolLedger({ ok: true, events: [call, success, { stage: 'call', name: 'subagent_codex_implementer', call_id: 'c2', ordinal: 2, allowed: false, arguments: { description: 'denied' } }, { ...error, call_id: 'c2' }] }, 'implement').ok, false);
 });
 
-function researchLedger({ searchPayload = { sources: [{ id: 'A' }, { id: 'B' }] }, verifyA = { id: 'A', verified: true }, verifyB = { id: 'B', verified: true }, verifyBError = false } = {}) {
+function researchLedger({ searchPayload = { sources: [{ id: 'A', url: 'fixture://literature/A' }, { id: 'B', url: 'fixture://literature/B' }] }, verifyA = { id: 'A', url: 'fixture://literature/A', verified: true }, verifyB = { id: 'B', url: 'fixture://literature/B', verified: true }, verifyBError = false } = {}) {
   return { ok: true, events: [
     { stage: 'call', name: 'mcp__literature__search_literature', call_id: 's1', ordinal: 1, allowed: true, arguments: { query: 'PIT' } },
     { stage: 'result', name: 'mcp__literature__search_literature', call_id: 's1', is_error: false, payload: searchPayload },
@@ -205,6 +288,9 @@ function researchLedger({ searchPayload = { sources: [{ id: 'A' }, { id: 'B' }] 
 test('MCP evidence binding rejects fabricated, negative, mismatched, malformed, absent, duplicate, and incomplete verification', () => {
   const evidence = { sources: [{ id: 'A' }, { id: 'B' }] };
   assert.equal(validatePhaseToolLedger(researchLedger(), 'research', evidence).ok, true);
+  assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { sources: [{ id: 'A', url: 'fixture://literature/same' }, { id: 'B', url: 'fixture://literature/same' }], }, verifyA: { id: 'A', url: 'fixture://literature/same', verified: true }, verifyB: { id: 'B', url: 'fixture://literature/same', verified: true } }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: { id: 'A', url: 'fixture://literature/other', verified: true } }), 'research', evidence).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { sources: [{ id: 'A', url: 'fixture://literature/A' }, { id: 'B', url: 'fixture://literature/B' }] }, verifyA: { id: 'A', url: 'fixture://literature/A', verified: true }, verifyB: { id: 'B', url: 'fixture://literature/B', verified: true } }), 'research', evidence).ok, true);
   assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { sources: [{ id: 'A' }, { id: 'B' }] }, verifyA: { id: 'FAB-A', verified: true }, verifyB: { id: 'FAB-B', verified: true } }), 'research', evidence).ok, false);
   assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: { id: 'A', verified: false } }), 'research', evidence).ok, false);
   assert.equal(validatePhaseToolLedger(researchLedger({ verifyA: { id: 'B', verified: true } }), 'research', evidence).ok, false);
@@ -220,6 +306,7 @@ test('MCP evidence binding rejects fabricated, negative, mismatched, malformed, 
   incomplete.events.pop();
   assert.equal(validatePhaseToolLedger(incomplete, 'research', evidence).ok, false);
   assert.equal(validatePhaseToolLedger(researchLedger(), 'research', { sources: [{ id: 'A' }, { id: 'A' }] }).ok, false);
+  assert.equal(validatePhaseToolLedger(researchLedger({ searchPayload: { sources: [{ id: 'A' }, { id: 'B' }] } }), 'research', evidence).ok, false);
 });
 
 test('gate parsers fail closed on ambiguity', () => {
@@ -266,6 +353,22 @@ test('ignored workspace mutation is detected even when Git porcelain stays clean
   }
 });
 
+test('touching an existing ignored directory is detected by directory metadata attestation', () => {
+  const cwd = createReconciliationRepo();
+  try {
+    const before = captureIgnoredState(cwd);
+    const ignoredDirectory = path.join(cwd, 'ignored');
+    const stat = fs.statSync(ignoredDirectory);
+    fs.utimesSync(ignoredDirectory, stat.atime, new Date(stat.mtimeMs + 2000));
+    const after = captureIgnoredState(cwd);
+    const diff = compareIgnoredState(before, after);
+    assert.equal(diff.ok, false, JSON.stringify(diff));
+    assert.ok(diff.changes.some((entry) => entry === 'ignored' || entry.startsWith('ignored/')));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('ignored empty directories, internal symlinks, and external symlink targets fail closed and remain inspectable', () => {
   const cwd = createReconciliationRepo();
   const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-external-'));
@@ -277,7 +380,10 @@ test('ignored empty directories, internal symlinks, and external symlink targets
     assert.ok(created.changes.includes('ignored/empty'));
     fs.rmdirSync(path.join(cwd, 'ignored/empty'));
     const deleted = compareIgnoredState(before, captureIgnoredState(cwd));
-    assert.equal(deleted.ok, true);
+    // Directory timestamps are authority metadata: create/delete activity on
+    // the ignored parent remains visible even after the empty child is gone.
+    assert.equal(deleted.ok, false);
+    assert.ok(deleted.changes.length > 0);
 
     fs.mkdirSync(path.join(cwd, 'ignored/target'), { recursive: true });
     fs.mkdirSync(path.join(cwd, 'ignored/target2'), { recursive: true });
@@ -316,6 +422,37 @@ test('Git config, include, and filter metadata mutation is separately attested',
     runGit(cwd, ['config', '--local', 'include.path', path.join(external, 'included.config')]);
     const externalInclude = captureGitMetadataState(cwd);
     assert.equal(externalInclude.ok, false);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test('external attributes and excludes files are bound, while oversized references fail closed', () => {
+  const cwd = createReconciliationRepo();
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-config-reference-'));
+  try {
+    const attributes = path.join(external, 'attributes');
+    const excludes = path.join(external, 'excludes');
+    fs.writeFileSync(attributes, '*.txt text\n');
+    fs.writeFileSync(excludes, 'ignored-from-external\n');
+    runGit(cwd, ['config', '--local', 'core.attributesFile', attributes]);
+    runGit(cwd, ['config', '--local', 'core.excludesFile', excludes]);
+    const before = captureGitMetadataState(cwd);
+    assert.equal(before.ok, true, JSON.stringify(before));
+    assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, true);
+
+    fs.writeFileSync(attributes, '*.txt -text\n');
+    assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, false);
+
+    const excludesBefore = captureGitMetadataState(cwd);
+    fs.writeFileSync(excludes, 'changed-external-ignore\n');
+    assert.equal(compareGitMetadataState(excludesBefore, captureGitMetadataState(cwd)).ok, false);
+
+    const oversized = path.join(external, 'oversized');
+    fs.writeFileSync(oversized, Buffer.alloc(2 * 1024 * 1024 + 1, 65));
+    runGit(cwd, ['config', '--local', 'core.attributesFile', oversized]);
+    assert.equal(captureGitMetadataState(cwd).ok, false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(external, { recursive: true, force: true });

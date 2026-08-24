@@ -17,7 +17,7 @@ USER — one command
 HOST SPRINT SUPERVISOR
   +--> deterministic task DAG / READY frontier
   +--> host tests + Git/HEAD scope + checkpoint commits
-  +--> parent request ceilings + per-phase child-tool guard/ledger
+  +--> parent request ceilings + per-phase trusted child-tool transcript
   +--> tracked/untracked + ignored-state boundary checks
   |
   +--> RESEARCH episode
@@ -52,9 +52,9 @@ V0 research exposes the logical contract:
 - `search_literature(query)`
 - `verify_source(id)`
 
-Research does not pass from parent prose alone. The host-owned per-phase tool ledger must prove at least one successful `search_literature` call, at least two distinct successful `verify_source` calls, and that every source identity claimed in `EVIDENCE_JSON.sources` is among those verified identities. A missing, malformed, denied, incomplete, or erroring required tool call fails closed.
+Research does not pass from parent prose alone. A trusted guard plugin emits per-phase JSONL tool events to a dedicated extra pipe captured by the host; the mutable filesystem and DSH stdout/stderr are not authority channels. The host transcript must prove at least one successful `search_literature` call, at least two successful `verify_source` calls for distinct canonical source identities, and that every source identity claimed in `EVIDENCE_JSON.sources` is among those verified identities. A missing, malformed, denied, incomplete, duplicate, reordered, or erroring required tool call fails closed.
 
-The MCP client's `failOnStartupError: true` activation completes connection/discovery before the tools are registered. Therefore a successful host-observed MCP tool call also requires the pinned client to have completed its initialize/discovery/list path; the qualification receipt treats that as a mechanically required predecessor, while the per-phase ledger directly attests the search/verify calls themselves.
+The MCP client's `failOnStartupError: true` activation completes connection/discovery before the tools are registered. Therefore a successful host-observed MCP tool call also requires the pinned client to have completed its initialize/discovery/list path; the qualification receipt treats that as a mechanically required predecessor, while the per-phase trusted transcript directly attests the search/verify calls themselves.
 
 Codex implementation and Claude review do not inherit the MCP surface.
 
@@ -73,7 +73,7 @@ Per GOVERNED task:
 - rereview: exactly one successful Claude delegation and only after repair;
 - whole-task replay: 0.
 
-The child-call limits are not prompt conventions. Each phase mounts a local Smokestack guard on DSH's monotonic tool-guard seam. A second Codex/Claude delegation in the same phase is denied before dispatch and recorded. Phase success additionally requires the host to parse the resulting ledger and prove exactly the expected successful child call with no denied, incomplete, or erroring duplicate.
+The child-call limits are not prompt conventions. Each phase mounts a local Smokestack guard on DSH's monotonic tool-guard seam. A second Codex/Claude delegation in the same phase is denied before dispatch and emitted to the host-owned trusted transcript. Phase success additionally requires the host to parse that captured stream and prove exactly the expected successful child call with no denied, incomplete, or erroring duplicate.
 
 Research cannot borrow lifecycle budget and the parent cannot enlarge either ceiling.
 
@@ -118,7 +118,7 @@ The disposable live sprint has four dependent tasks:
 
 PASS requires zero human intervention, all four tasks PASS, mechanically admitted MCP discovery plus host-attested search/source verification, read-only research, host tests, exact child-call ceilings, unambiguous TEN_STACK gates, zero unauthorized Git/HEAD writes, unchanged ignored workspace state, bounded repair/rereview if triggered, four hook-disabled host checkpoint commits with exact path attestation, a clean final worktree, and a machine-readable final receipt.
 
-GitHub Actions runs zero-model syntax/control tests, including authority matching, child-call guard/ledger enforcement, MCP evidence binding, ignored-state contamination detection, HEAD drift rejection, malicious pre-commit-hook suppression, exact checkpoint attestation, and non-PASS cleanup followed by a different task. Native Codex/Claude subscription authentication and OpenRouter model spend are exercised only by the local live qualification.
+GitHub Actions runs zero-model syntax/control tests, including authority matching, child-call guard/transcript enforcement, MCP evidence binding, ignored-state contamination detection, HEAD drift rejection, malicious pre-commit-hook suppression, exact checkpoint attestation, and non-PASS cleanup followed by a different task. Native Codex/Claude subscription authentication and OpenRouter model spend are exercised only by the local live qualification.
 
 The live four-task qualification remains blocked until the repaired host-control candidate survives the one allowed targeted independent rereview with no remaining Critical/High finding.
 

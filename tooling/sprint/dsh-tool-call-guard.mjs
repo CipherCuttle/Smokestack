@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 export const name = 'smokestack-tool-call-guard';
 export const inject = ['tools'];
@@ -14,9 +13,16 @@ function parseJsonEnv(name, fallback) {
   }
 }
 
-function appendLedger(file, event) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
+function trustedChannelFd() {
+  const raw = process.env.DSH_SMOKESTACK_TOOL_GUARD_FD;
+  if (!raw || !/^\d+$/.test(raw)) throw new Error('DSH_SMOKESTACK_TOOL_GUARD_FD is required');
+  const fd = Number(raw);
+  if (!Number.isSafeInteger(fd) || fd < 3) throw new Error('DSH_SMOKESTACK_TOOL_GUARD_FD must be a safe fd >= 3');
+  return fd;
+}
+
+function appendTrustedEvent(fd, event) {
+  fs.writeSync(fd, `${JSON.stringify(event)}\n`, undefined, 'utf8');
 }
 
 function safeArguments(exec) {
@@ -33,7 +39,7 @@ function safeArguments(exec) {
   const description = exec.arguments && typeof exec.arguments === 'object'
     ? exec.arguments.description
     : undefined;
-  return typeof description === 'string' ? { description } : {};
+  return typeof description === 'string' ? { description: description.slice(0, MAX_RESULT_TEXT) } : {};
 }
 
 const MAX_RESULT_TEXT = 32 * 1024;
@@ -74,8 +80,7 @@ function resultPayload(exec, result) {
 }
 
 export function apply(ctx) {
-  const ledger = process.env.SMOKESTACK_TOOL_GUARD_LEDGER;
-  if (!ledger) throw new Error('SMOKESTACK_TOOL_GUARD_LEDGER is required');
+  const trustedFd = trustedChannelFd();
 
   const rawLimits = parseJsonEnv('SMOKESTACK_TOOL_GUARD_LIMITS', {});
   const rawObserve = parseJsonEnv('SMOKESTACK_TOOL_GUARD_OBSERVE', []);
@@ -101,7 +106,7 @@ export function apply(ctx) {
     counts.set(exec.name, ordinal);
     const max = limits.get(exec.name);
     const allowed = max === undefined || ordinal <= max;
-    appendLedger(ledger, {
+    appendTrustedEvent(trustedFd, {
       stage: 'call',
       name: exec.name,
       call_id: exec.callId,
@@ -116,7 +121,7 @@ export function apply(ctx) {
 
   ctx.on('tools/result', (exec, result) => {
     if (!observed.has(exec.name)) return;
-    appendLedger(ledger, {
+    appendTrustedEvent(trustedFd, {
       stage: 'result',
       name: exec.name,
       call_id: exec.callId,

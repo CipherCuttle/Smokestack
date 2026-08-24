@@ -32,16 +32,23 @@ export function runSync(cmd, args, opts = {}) {
 export function runAsync(cmd, args, opts = {}) {
   const label = opts.label ?? path.basename(cmd);
   const timeoutMs = opts.timeoutMs ?? 360_000;
+  const trustedChannel = opts.trustedChannel === true;
   return new Promise((resolve) => {
     const started = Date.now();
     let stdout = '';
     let stderr = '';
+    let trustedTranscript = '';
+    let trustedTranscriptBytes = 0;
+    let trustedTranscriptOverflow = false;
+    let trustedChannelClosed = !trustedChannel;
+    let trustedChannelError = null;
     let settled = false;
     const max = opts.maxBuffer ?? 16 * 1024 * 1024;
+    const trustedMax = opts.trustedMaxBuffer ?? 4 * 1024 * 1024;
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...(opts.env ?? {}) },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', trustedChannel ? 'pipe' : 'ignore'],
     });
     const append = (current, chunk) => {
       const next = current + chunk.toString('utf8');
@@ -55,6 +62,31 @@ export function runAsync(cmd, args, opts = {}) {
       stderr = append(stderr, c);
       if (opts.echo === true) process.stderr.write(c);
     });
+    if (trustedChannel) {
+      const stream = child.stdio[3];
+      if (!stream) {
+        trustedChannelClosed = true;
+        trustedChannelError = 'trusted tool channel was not created';
+      } else {
+        stream.on('data', (chunk) => {
+          const text = chunk.toString('utf8');
+          const bytes = Buffer.from(text, 'utf8');
+          const previousBytes = trustedTranscriptBytes;
+          trustedTranscriptBytes += bytes.length;
+          if (previousBytes < trustedMax) {
+            trustedTranscript += bytes.subarray(0, trustedMax - previousBytes).toString('utf8');
+          }
+          if (trustedTranscriptBytes > trustedMax) trustedTranscriptOverflow = true;
+        });
+        const closeTrustedChannel = () => { trustedChannelClosed = true; };
+        stream.once('end', closeTrustedChannel);
+        stream.once('close', closeTrustedChannel);
+        stream.once('error', (err) => {
+          trustedChannelError = String(err);
+          closeTrustedChannel();
+        });
+      }
+    }
     const heartbeat = setInterval(() => {
       console.log(`SPRINT_HEARTBEAT ${label} elapsed_s=${Math.floor((Date.now() - started) / 1000)}`);
     }, opts.heartbeatMs ?? 20_000);
@@ -77,6 +109,11 @@ export function runAsync(cmd, args, opts = {}) {
         stdout,
         stderr: error ? `${stderr}\n${String(error)}` : stderr,
         duration_ms: Date.now() - started,
+        trusted_transcript: trustedTranscript,
+        trusted_transcript_bytes: trustedTranscriptBytes,
+        trusted_transcript_complete: !trustedChannel
+          || (trustedChannelClosed && !trustedTranscriptOverflow && trustedChannelError === null),
+        trusted_transcript_error: trustedChannelError,
       };
       console.log(`SPRINT_PHASE_DONE ${label} exit=${out.exit} duration_ms=${out.duration_ms}`);
       resolve(out);
@@ -193,9 +230,7 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
   const parent = path.join(controlDir, `parent-${phase}.yml`);
   const role = path.join(controlDir, `role-${phase}.yml`);
   const guardPlugin = path.join(controlDir, 'dsh-tool-call-guard.mjs');
-  const guardLedger = path.join(controlDir, 'tool-call-ledger.jsonl');
   fs.copyFileSync(toolGuardSource, guardPlugin);
-  fs.rmSync(guardLedger, { force: true });
 
   fs.writeFileSync(parent, `- id: llm-pi-ai
   config:
@@ -259,18 +294,28 @@ export function writeDshPatches({ controlDir, port, phase, researchMcp = null })
     throw new Error(`unsupported DSH phase: ${phase}`);
   }
   fs.writeFileSync(role, rows.join('\n'));
-  return { parent, role, guardLedger, guardLimits, guardObserve };
+  return { parent, role, guardLimits, guardObserve };
 }
 
-export function readToolGuardLedger(file) {
-  if (!file || !fs.existsSync(file)) return { ok: false, error: 'tool guard ledger missing', events: [] };
+export function readToolGuardTranscript(input) {
+  const complete = typeof input === 'object' && input !== null
+    ? input.complete === true
+    : true;
+  const transcript = typeof input === 'string'
+    ? input
+    : typeof input?.data === 'string' ? input.data : '';
+  if (!complete) return { ok: false, error: 'trusted tool transcript incomplete', events: [] };
+  if (transcript.length === 0) return { ok: false, error: 'trusted tool transcript missing', events: [] };
+  if (!transcript.endsWith('\n')) return { ok: false, error: 'trusted tool transcript truncated', events: [] };
   const events = [];
-  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+  const lines = transcript.split(/\r?\n/);
+  lines.pop();
   try {
     for (const line of lines) {
+      if (line.length === 0) throw new Error('invalid blank trusted tool transcript frame');
       const event = JSON.parse(line);
       if (!event || typeof event !== 'object' || typeof event.stage !== 'string' || typeof event.name !== 'string') {
-        throw new Error('invalid tool guard ledger event');
+        throw new Error('invalid trusted tool transcript event');
       }
       events.push(event);
     }
@@ -312,10 +357,11 @@ export async function dshRun({ cwd, patches, prompt, label, timeoutSeconds = 300
     env: {
       DSH_PERMISSION_MODE: 'read-only',
       DSH_TOOLS_MODE: 'native',
-      SMOKESTACK_TOOL_GUARD_LEDGER: patches.guardLedger,
+      DSH_SMOKESTACK_TOOL_GUARD_FD: '3',
       SMOKESTACK_TOOL_GUARD_LIMITS: JSON.stringify(patches.guardLimits ?? {}),
       SMOKESTACK_TOOL_GUARD_OBSERVE: JSON.stringify(patches.guardObserve ?? []),
     },
+    trustedChannel: true,
     timeoutMs: (timeoutSeconds + 10) * 1000,
     label,
   });

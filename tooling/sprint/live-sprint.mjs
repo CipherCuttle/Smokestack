@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
   createSprint,
@@ -20,7 +21,7 @@ import {
   runSync,
   startOpenRouterProxy,
   writeDshPatches,
-  readToolGuardLedger,
+  readToolGuardTranscript,
   parseReviewGate,
   parseResearchReceipt,
   dshRun,
@@ -92,6 +93,7 @@ export function changedPaths(cwd) {
 
 const MAX_IGNORED_ENTRIES = 20_000;
 const MAX_GIT_METADATA_FILE = 2 * 1024 * 1024;
+const MAX_GIT_CONFIG_REFERENCES = 128;
 const MAX_CONTENT_FILE = 64 * 1024 * 1024;
 
 function within(root, target) {
@@ -109,8 +111,8 @@ function ignoredFingerprint(root, repoPath, target) {
     ino: String(stat.ino),
     mode: String(stat.mode),
     size: String(stat.size),
-    mtime_ns: type === 'directory' ? null : String(stat.mtimeNs),
-    ctime_ns: type === 'directory' ? null : String(stat.ctimeNs),
+    mtime_ns: String(stat.mtimeNs),
+    ctime_ns: String(stat.ctimeNs),
     link: type === 'symlink' ? fs.readlinkSync(target) : null,
     resolved: null,
     target: null,
@@ -274,6 +276,33 @@ function captureMetadataDirectory(directory, authorities, output, prefix, count 
   }
 }
 
+function parseLocalGitConfigRecords(text) {
+  const fields = text.split('\0');
+  if (fields.at(-1) === '') fields.pop();
+  if (fields.length === 0 || fields.length % 2 !== 0) throw new Error('malformed local Git config records');
+  const records = [];
+  for (let index = 0; index < fields.length; index += 2) {
+    const origin = fields[index];
+    const pair = fields[index + 1];
+    const separator = pair.indexOf('\n');
+    if (!origin || separator <= 0) throw new Error('malformed local Git config record');
+    records.push({ origin, key: pair.slice(0, separator).toLowerCase(), value: pair.slice(separator + 1) });
+  }
+  return records;
+}
+
+function resolveGitConfigReference(cwd, rawValue) {
+  let value = rawValue.trim();
+  if (!value || value.includes('\0')) throw new Error('Git file reference is empty or malformed');
+  if (value === '~') value = homedir();
+  else if (value.startsWith('~/')) value = path.join(homedir(), value.slice(2));
+  else if (value.startsWith('~')) throw new Error(`Git file reference uses unsupported home expansion: ${rawValue}`);
+  // Git resolves these effective core paths from the command's worktree
+  // context, not from the config file's directory (verified for relative
+  // attributesFile/excludesFile values).
+  return path.resolve(cwd, value);
+}
+
 export function captureGitMetadataState(cwd) {
   const identityNames = ['--git-dir', '--git-common-dir', '--show-toplevel', '--is-inside-work-tree', '--is-bare-repository'];
   const identity = {};
@@ -296,18 +325,32 @@ export function captureGitMetadataState(cwd) {
     }
     const localConfig = runSync('git', ['config', '--local', '--includes', '--show-origin', '--null', '--list'], { cwd });
     if (localConfig.exit !== 0) throw new Error(`cannot inspect local Git config: ${localConfig.stderr}`);
+    if (Buffer.byteLength(localConfig.stdout, 'utf8') > MAX_GIT_METADATA_FILE) throw new Error('effective local Git config too large');
     files['<effective-local-config>'] = {
       present: true,
       sha256: crypto.createHash('sha256').update(localConfig.stdout).digest('hex'),
     };
-    const originPattern = /(?:^|\0)file:([^\0\t\r\n]+)/g;
-    for (const match of localConfig.stdout.matchAll(originPattern)) {
-      const origin = path.resolve(cwd, match[1]);
+    const configRecords = parseLocalGitConfigRecords(localConfig.stdout);
+    for (const record of configRecords) {
+      if (!record.origin.startsWith('file:')) throw new Error(`local Git config has non-file origin: ${record.origin}`);
+      const origin = path.resolve(cwd, record.origin.slice('file:'.length));
       if (!authorities.some((authority) => within(authority, origin))) {
-        throw new Error(`local Git config includes external file: ${match[1]}`);
+        throw new Error(`local Git config includes external file: ${record.origin}`);
       }
-      const key = path.relative(root, origin) || match[1];
+      const key = path.relative(root, origin) || record.origin;
       files[key] = metadataFileFingerprint(origin, authorities);
+    }
+    const references = configRecords.filter((record) => record.key === 'core.attributesfile' || record.key === 'core.excludesfile');
+    if (references.length > MAX_GIT_CONFIG_REFERENCES) throw new Error('security-relevant Git config reference limit exceeded');
+    const referenceCounts = new Map();
+    for (const reference of references) {
+      const target = resolveGitConfigReference(cwd, reference.value);
+      const ordinal = referenceCounts.get(reference.key) ?? 0;
+      referenceCounts.set(reference.key, ordinal + 1);
+      files[`<git-config-reference>/${reference.key}/${ordinal}`] = {
+        target,
+        fingerprint: metadataFileFingerprint(target, authorities),
+      };
     }
     for (const name of ['hooks', 'info']) {
       const directory = gitPath(cwd, name);
@@ -406,6 +449,7 @@ function strictLedger(ledger, phase) {
   const results = new Map();
   const callIds = new Set();
   const callOrdinals = new Map();
+  let pendingCall = null;
   for (const event of ledger.events) {
     if (!plainObject(event) || (event.stage !== 'call' && event.stage !== 'result')) return { ok: false, reason: 'MALFORMED_LEDGER_EVENT', calls, results };
     if (typeof event.name !== 'string' || !allowedNames.has(event.name)) return { ok: false, reason: 'UNEXPECTED_TOOL_NAME', calls, results };
@@ -415,21 +459,23 @@ function strictLedger(ledger, phase) {
       : new Set(['stage', 'name', 'call_id', 'is_error', ...(event.name.startsWith('mcp__literature__') ? ['payload'] : [])]);
     if (Object.keys(event).some((key) => !allowedKeys.has(key))) return { ok: false, reason: 'UNKNOWN_LEDGER_EVENT_FIELD', calls, results };
     if (event.stage === 'call') {
+      if (pendingCall !== null) return { ok: false, reason: 'REORDERED_LEDGER_EVENT', calls, results };
       if (callIds.has(event.call_id) || results.has(event.call_id)) return { ok: false, reason: 'DUPLICATE_CALL_ID', calls, results };
       if (!Number.isSafeInteger(event.ordinal) || event.ordinal < 1) return { ok: false, reason: 'MALFORMED_CALL_ORDINAL', calls, results };
       const expectedOrdinal = (callOrdinals.get(event.name) ?? 0) + 1;
       if (event.ordinal !== expectedOrdinal) return { ok: false, reason: 'NON_MONOTONIC_CALL_ORDINAL', calls, results };
-      if (typeof event.allowed !== 'boolean' || !plainObject(event.arguments)) return { ok: false, reason: 'MALFORMED_CALL_EVENT', calls, results };
+      if (typeof event.allowed !== 'boolean' || !plainObject(event.arguments) || !boundedPayload(event.arguments)) return { ok: false, reason: 'MALFORMED_CALL_EVENT', calls, results };
       if (event.name === 'mcp__literature__search_literature' && event.arguments.query !== undefined && typeof event.arguments.query !== 'string') return { ok: false, reason: 'MALFORMED_MCP_SEARCH_ARGUMENTS', calls, results };
       if (event.name === 'mcp__literature__verify_source' && (typeof event.arguments.id !== 'string' || event.arguments.id.length === 0)) return { ok: false, reason: 'MALFORMED_MCP_VERIFY_ARGUMENTS', calls, results };
       callIds.add(event.call_id);
       callOrdinals.set(event.name, event.ordinal);
       calls.push(event);
+      pendingCall = event;
       continue;
     }
     if (results.has(event.call_id)) return { ok: false, reason: 'DUPLICATE_RESULT', calls, results };
-    const call = calls.find((candidate) => candidate.call_id === event.call_id);
-    if (!call) return { ok: false, reason: 'ORPHAN_OR_RESULT_BEFORE_CALL', calls, results };
+    const call = pendingCall;
+    if (!call || call.call_id !== event.call_id) return { ok: false, reason: 'ORPHAN_OR_REORDERED_RESULT', calls, results };
     if (call.name !== event.name) return { ok: false, reason: 'RESULT_TOOL_NAME_MISMATCH', calls, results };
     if (typeof event.is_error !== 'boolean') return { ok: false, reason: 'MALFORMED_RESULT_EVENT', calls, results };
     if (Object.prototype.hasOwnProperty.call(event, 'payload') && !boundedPayload(event.payload)) return { ok: false, reason: 'MALFORMED_RESULT_PAYLOAD', calls, results };
@@ -437,8 +483,9 @@ function strictLedger(ledger, phase) {
       return { ok: false, reason: 'MISSING_MCP_RESULT_PAYLOAD', calls, results };
     }
     results.set(event.call_id, event);
+    pendingCall = null;
   }
-  if (calls.some((call) => !results.has(call.call_id))) return { ok: false, reason: 'INCOMPLETE_CALL_RESULT_SETTLEMENT', calls, results };
+  if (pendingCall !== null || calls.some((call) => !results.has(call.call_id))) return { ok: false, reason: 'INCOMPLETE_CALL_RESULT_SETTLEMENT', calls, results };
   return { ok: true, reason: null, calls, results };
 }
 
@@ -451,23 +498,50 @@ function successfulToolCalls(inspected, name) {
   return { calls, successful, denied, incomplete, errored };
 }
 
-function searchSourceIds(successfulSearches, results) {
-  const ids = new Set();
-  for (const call of successfulSearches) {
-    const payload = results.get(call.call_id)?.payload;
-    if (!plainObject(payload) || !Array.isArray(payload.sources)) continue;
-    for (const source of payload.sources) {
-      if (plainObject(source) && typeof source.id === 'string' && source.id.length > 0 && source.id.length <= 512) ids.add(source.id);
-    }
-  }
-  return [...ids].sort();
+export function canonicalSourceIdentity(source) {
+  if (!plainObject(source) || typeof source.url !== 'string') return null;
+  const raw = source.url.trim();
+  if (raw.length === 0 || raw.length > 4096) return null;
+  let parsed;
+  try { parsed = new URL(raw); } catch { return null; }
+  if (!parsed.protocol || parsed.username || parsed.password) return null;
+  return `url:${parsed.href}`;
 }
 
-function verifiedPayloadId(payload) {
+function sourceRecord(source) {
+  if (!plainObject(source) || typeof source.id !== 'string' || source.id.length === 0 || source.id.length > 512) return null;
+  const identity = canonicalSourceIdentity(source);
+  return identity === null ? null : { id: source.id, identity };
+}
+
+function searchSourceRecords(successfulSearches, results) {
+  const sources = new Map();
+  let malformed = false;
+  for (const call of successfulSearches) {
+    const payload = results.get(call.call_id)?.payload;
+    if (!plainObject(payload) || !Array.isArray(payload.sources)) {
+      malformed = true;
+      continue;
+    }
+    for (const source of payload.sources) {
+      const record = sourceRecord(source);
+      if (!record || sources.has(record.id)) {
+        malformed = true;
+        continue;
+      }
+      sources.set(record.id, record.identity);
+    }
+  }
+  return { sources, malformed };
+}
+
+function verifiedPayloadSource(payload) {
   if (!plainObject(payload) || payload.verified !== true) return null;
-  if (typeof payload.id === 'string') return payload.id;
-  if (plainObject(payload.source) && typeof payload.source.id === 'string') return payload.source.id;
-  return null;
+  const source = plainObject(payload.source) ? payload.source : payload;
+  const record = sourceRecord(source);
+  if (!record) return null;
+  if (payload.source && payload.id !== undefined && payload.id !== record.id) return null;
+  return record;
 }
 
 export function validatePhaseToolLedger(ledger, phase, evidence = null) {
@@ -507,17 +581,22 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
   if (phase === 'research') {
     const search = successfulToolCalls(strict, 'mcp__literature__search_literature');
     const verify = successfulToolCalls(strict, 'mcp__literature__verify_source');
-    const searchedIds = searchSourceIds(search.successful, strict.results);
+    const searched = searchSourceRecords(search.successful, strict.results);
+    const searchedIds = [...searched.sources.keys()].sort();
     const verificationCounts = new Map();
     const verifiedIds = [];
+    const verifiedIdentities = new Set();
     let malformedVerification = false;
     for (const call of verify.successful) {
       const requestedId = call.arguments.id;
-      const returnedId = verifiedPayloadId(strict.results.get(call.call_id)?.payload);
-      if (!searchedIds.includes(requestedId) || returnedId !== requestedId) malformedVerification = true;
-      if (returnedId === requestedId) {
-        verificationCounts.set(returnedId, (verificationCounts.get(returnedId) ?? 0) + 1);
-        if (!verifiedIds.includes(returnedId)) verifiedIds.push(returnedId);
+      const returned = verifiedPayloadSource(strict.results.get(call.call_id)?.payload);
+      if (!searched.sources.has(requestedId) || returned?.id !== requestedId || returned?.identity !== searched.sources.get(requestedId)) {
+        malformedVerification = true;
+      }
+      if (returned?.id === requestedId && returned.identity === searched.sources.get(requestedId)) {
+        verificationCounts.set(requestedId, (verificationCounts.get(requestedId) ?? 0) + 1);
+        verifiedIdentities.add(returned.identity);
+        if (!verifiedIds.includes(requestedId)) verifiedIds.push(requestedId);
       }
     }
     verifiedIds.sort();
@@ -527,6 +606,9 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
     const validEvidenceIds = evidenceIds.length >= 2
       && evidenceIds.every((id) => typeof id === 'string' && id.length > 0 && searchedIds.includes(id))
       && new Set(evidenceIds).size === evidenceIds.length;
+    const evidenceIdentities = validEvidenceIds
+      ? new Set(evidenceIds.map((id) => searched.sources.get(id)))
+      : new Set();
     const everyEvidenceSourceVerified = validEvidenceIds
       && evidenceIds.every((id) => verificationCounts.get(id) === 1);
     const noFailures = search.denied.length === 0
@@ -538,7 +620,10 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
     const ok = search.successful.length >= 1
       && searchedIds.length >= 2
       && verifiedIds.length >= 2
+      && evidenceIdentities.size >= 2
+      && verifiedIdentities.size >= 2
       && everyEvidenceSourceVerified
+      && !searched.malformed
       && !malformedVerification
       && [...verificationCounts.values()].every((count) => count === 1)
       && noFailures;
@@ -553,6 +638,8 @@ export function validatePhaseToolLedger(ledger, phase, evidence = null) {
         verify_successful: verify.successful.length,
         searched_sources: searchedIds.length,
         verified_sources: verifiedIds.length,
+        verified_canonical_sources: verifiedIdentities.size,
+        evidence_canonical_sources: evidenceIdentities.size,
       },
       searched_source_ids: searchedIds,
       verified_source_ids: verifiedIds,
@@ -1126,7 +1213,7 @@ async function runResearch({ cwd, task, controlRoot, researchMcp }) {
     const gitMetadataState = compareGitMetadataState(gitMetadataBefore, gitMetadataAfter);
     const headAfter = resolveHead(cwd);
     const parsed = parseResearchReceipt(`${result.stdout}\n${result.stderr}`);
-    const ledger = readToolGuardLedger(patches.guardLedger);
+    const ledger = readToolGuardTranscript({ data: result.trusted_transcript, complete: result.trusted_transcript_complete });
     const toolGuard = validatePhaseToolLedger(ledger, 'research', parsed.evidence);
     const validEvidence = parsed.evidence && Array.isArray(parsed.evidence.sources) && parsed.evidence.sources.length >= 2;
     const gitUnchanged = JSON.stringify(before) === JSON.stringify(after);
@@ -1165,7 +1252,7 @@ async function runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, rese
     startImplementation(sprint, task.id);
     let patches = writeDshPatches({ controlDir: path.join(controlRoot, task.id, 'implement'), port: proxy.port, phase: 'implement' });
     let result = await dshRun({ cwd, patches, prompt: buildImplementPrompt(task, researchEvidence), label: `${task.id}/IMPLEMENT`, timeoutSeconds: 300 });
-    let toolGuard = validatePhaseToolLedger(readToolGuardLedger(patches.guardLedger), 'implement');
+    let toolGuard = validatePhaseToolLedger(readToolGuardTranscript({ data: result.trusted_transcript, complete: result.trusted_transcript_complete }), 'implement');
     const implementMarker = /(^|\n)SPRINT_IMPLEMENT_OK(\n|$)/.test(result.stdout);
     const implementOk = result.exit === 0 && implementMarker && toolGuard.ok;
     phases.push({ phase: 'IMPLEMENT', exit: result.exit, marker: implementMarker, tool_guard: toolGuard, duration_ms: result.duration_ms });
@@ -1179,7 +1266,7 @@ async function runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, rese
 
     patches = writeDshPatches({ controlDir: path.join(controlRoot, task.id, 'review'), port: proxy.port, phase: 'review' });
     result = await dshRun({ cwd, patches, prompt: buildReviewPrompt(task, tenStack, 'hostile review'), label: `${task.id}/REVIEW`, timeoutSeconds: 300 });
-    toolGuard = validatePhaseToolLedger(readToolGuardLedger(patches.guardLedger), 'review');
+    toolGuard = validatePhaseToolLedger(readToolGuardTranscript({ data: result.trusted_transcript, complete: result.trusted_transcript_complete }), 'review');
     const reviewText = `${result.stdout}\n${result.stderr}`;
     const gate = result.exit === 0 && toolGuard.ok ? parseReviewGate(reviewText) : 'AMBIGUOUS';
     phases.push({ phase: 'REVIEW', exit: result.exit, gate, tool_guard: toolGuard, duration_ms: result.duration_ms });
@@ -1193,7 +1280,7 @@ async function runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, rese
     startRepair(sprint, task.id);
     patches = writeDshPatches({ controlDir: path.join(controlRoot, task.id, 'repair'), port: proxy.port, phase: 'repair' });
     result = await dshRun({ cwd, patches, prompt: buildRepairPrompt(task, reviewText), label: `${task.id}/REPAIR`, timeoutSeconds: 300 });
-    toolGuard = validatePhaseToolLedger(readToolGuardLedger(patches.guardLedger), 'repair');
+    toolGuard = validatePhaseToolLedger(readToolGuardTranscript({ data: result.trusted_transcript, complete: result.trusted_transcript_complete }), 'repair');
     const repairMarker = /(^|\n)SPRINT_REPAIR_OK(\n|$)/.test(result.stdout);
     const repairOk = result.exit === 0 && repairMarker && toolGuard.ok;
     phases.push({ phase: 'REPAIR', exit: result.exit, marker: repairMarker, tool_guard: toolGuard, duration_ms: result.duration_ms });
@@ -1207,7 +1294,7 @@ async function runTaskLifecycle({ cwd, task, sprint, tenStack, controlRoot, rese
 
     patches = writeDshPatches({ controlDir: path.join(controlRoot, task.id, 'rereview'), port: proxy.port, phase: 'rereview' });
     result = await dshRun({ cwd, patches, prompt: buildReviewPrompt(task, tenStack, 'targeted rereview'), label: `${task.id}/REREVIEW`, timeoutSeconds: 300 });
-    toolGuard = validatePhaseToolLedger(readToolGuardLedger(patches.guardLedger), 'rereview');
+    toolGuard = validatePhaseToolLedger(readToolGuardTranscript({ data: result.trusted_transcript, complete: result.trusted_transcript_complete }), 'rereview');
     const rereviewText = `${result.stdout}\n${result.stderr}`;
     const rereviewGate = result.exit === 0 && toolGuard.ok ? parseReviewGate(rereviewText) : 'AMBIGUOUS';
     phases.push({ phase: 'REREVIEW', exit: result.exit, gate: rereviewGate, tool_guard: toolGuard, duration_ms: result.duration_ms });
