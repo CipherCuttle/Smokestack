@@ -292,8 +292,10 @@ function parseGitConfigRecords(text, label) {
 }
 
 function resolveGitConfigReference(cwd, expandedValue) {
-  const value = expandedValue.trim();
-  if (!value || value.includes('\0')) throw new Error('Git file reference is empty or malformed');
+  if (typeof expandedValue !== 'string' || expandedValue.length === 0 || expandedValue.includes('\0')) {
+    throw new Error('Git file reference is empty or malformed');
+  }
+  const value = expandedValue;
   if (value.includes('%(') || value === '~' || value.startsWith('~/') || value.startsWith('~')) {
     throw new Error(`Git file reference was not fully expanded: ${expandedValue}`);
   }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +26,39 @@ function runGit(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if ((result.status ?? 125) !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
   return result.stdout.trim();
+}
+
+function gitPathValue(cwd, key) {
+  const result = spawnSync('git', ['config', '--local', '--path', '--null', '--get', key], { cwd, encoding: 'utf8' });
+  if ((result.status ?? 125) !== 0) throw new Error(`git config ${key} failed: ${result.stderr}`);
+  assert.equal(result.stdout.endsWith('\0'), true, `Git path output was not NUL terminated: ${JSON.stringify(result.stdout)}`);
+  return result.stdout.slice(0, -1);
+}
+
+function referenceFingerprint(file) {
+  const stat = fs.statSync(file, { bigint: true });
+  return {
+    present: true,
+    type: 'file',
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    mode: String(stat.mode),
+    size: String(stat.size),
+    mtime_ns: String(stat.mtimeNs),
+    ctime_ns: String(stat.ctimeNs),
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),
+  };
+}
+
+function captureLegacyTrimmedReference(cwd) {
+  const expanded = gitPathValue(cwd, 'core.attributesFile');
+  const target = path.resolve(cwd, expanded.trim());
+  return {
+    ok: true,
+    error: null,
+    identity: {},
+    files: { reference: { target, fingerprint: referenceFingerprint(target) } },
+  };
 }
 
 function createReconciliationRepo() {
@@ -501,6 +535,106 @@ test('effective external attributes and excludes mutations fail closed', () => {
     else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test('Git-consumed whitespace-bearing attributes paths are bound losslessly', () => {
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-lossless-path-'));
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-lossless-home-'));
+  const globalConfig = path.join(configHome, 'global.config');
+  const previous = {
+    global: process.env.GIT_CONFIG_GLOBAL,
+    system: process.env.GIT_CONFIG_NOSYSTEM,
+    home: process.env.HOME,
+  };
+  try {
+    fs.writeFileSync(globalConfig, '');
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.HOME = configHome;
+    const cwd = createReconciliationRepo();
+    try {
+      const tracked = path.join(cwd, 'experiments/qualification/tracked.txt');
+      const cases = [
+        {
+          name: 'quoted trailing space',
+          configured: path.join(external, 'attributes-trailing '),
+          target: path.join(external, 'attributes-trailing '),
+          legacyTarget: path.join(external, 'attributes-trailing'),
+        },
+        {
+          name: 'quoted multiple trailing spaces',
+          configured: path.join(external, 'attributes-multiple  '),
+          target: path.join(external, 'attributes-multiple  '),
+          legacyTarget: path.join(external, 'attributes-multiple'),
+        },
+        {
+          name: 'quoted leading relative space',
+          configured: ' leading-attributes',
+          target: path.join(cwd, ' leading-attributes'),
+          legacyTarget: path.join(cwd, 'leading-attributes'),
+        },
+        {
+          name: 'ordinary absolute path',
+          configured: path.join(external, 'attributes-absolute'),
+          target: path.join(external, 'attributes-absolute'),
+        },
+        {
+          name: 'ordinary relative path',
+          configured: 'attributes-relative',
+          target: path.join(cwd, 'attributes-relative'),
+        },
+        {
+          name: '%(prefix) path expansion',
+          configured: `%(prefix)/../${path.relative('/', path.join(external, 'attributes-prefix'))}`,
+          target: path.join(external, 'attributes-prefix'),
+        },
+        {
+          name: '~/path expansion',
+          configured: '~/attributes-home',
+          target: path.join(configHome, 'attributes-home'),
+        },
+      ];
+
+      for (const scenario of cases) {
+        fs.writeFileSync(scenario.target, '*.txt text\n');
+        if (scenario.legacyTarget) fs.writeFileSync(scenario.legacyTarget, '*.txt -text\n');
+        runGit(cwd, ['config', '--local', 'core.attributesFile', scenario.configured]);
+
+        const expanded = gitPathValue(cwd, 'core.attributesFile');
+        assert.equal(path.resolve(cwd, expanded), scenario.target, `${scenario.name}: Git path oracle mismatch`);
+        const before = captureGitMetadataState(cwd);
+        assert.equal(before.ok, true, `${scenario.name}: ${JSON.stringify(before)}`);
+        assert.ok(Object.values(before.files).some((entry) => entry?.target === scenario.target), `${scenario.name}: target not attested`);
+        assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: set/);
+        assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, true, `${scenario.name}: unchanged state was not clean`);
+
+        if (scenario.legacyTarget) {
+          const legacyBefore = captureLegacyTrimmedReference(cwd);
+          assert.equal(legacyBefore.files.reference.target, scenario.legacyTarget, `${scenario.name}: legacy target did not reproduce normalization`);
+          fs.writeFileSync(scenario.target, '*.txt -text\n');
+          const legacyAfter = captureLegacyTrimmedReference(cwd);
+          assert.equal(compareGitMetadataState(legacyBefore, legacyAfter).ok, true, `${scenario.name}: legacy reproduction did not remain falsely clean`);
+          assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+          assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, false, `${scenario.name}: repaired attestation stayed clean`);
+        } else {
+          fs.writeFileSync(scenario.target, '*.txt -text\n');
+          assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+          assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, false, `${scenario.name}: mutation was not attested`);
+        }
+      }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  } finally {
+    if (previous.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.global;
+    if (previous.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
+    if (previous.home === undefined) delete process.env.HOME;
+    else process.env.HOME = previous.home;
+    fs.rmSync(external, { recursive: true, force: true });
+    fs.rmSync(configHome, { recursive: true, force: true });
   }
 });
 
