@@ -276,16 +276,16 @@ function captureMetadataDirectory(directory, authorities, output, prefix, count 
   }
 }
 
-function parseLocalGitConfigRecords(text) {
+function parseGitConfigRecords(text, label) {
   const fields = text.split('\0');
   if (fields.at(-1) === '') fields.pop();
-  if (fields.length === 0 || fields.length % 2 !== 0) throw new Error('malformed local Git config records');
+  if (fields.length === 0 || fields.length % 2 !== 0) throw new Error(`malformed ${label} Git config records`);
   const records = [];
   for (let index = 0; index < fields.length; index += 2) {
     const origin = fields[index];
     const pair = fields[index + 1];
     const separator = pair.indexOf('\n');
-    if (!origin || separator <= 0) throw new Error('malformed local Git config record');
+    if (!origin || separator <= 0) throw new Error(`malformed ${label} Git config record`);
     records.push({ origin, key: pair.slice(0, separator).toLowerCase(), value: pair.slice(separator + 1) });
   }
   return records;
@@ -330,7 +330,7 @@ export function captureGitMetadataState(cwd) {
       present: true,
       sha256: crypto.createHash('sha256').update(localConfig.stdout).digest('hex'),
     };
-    const configRecords = parseLocalGitConfigRecords(localConfig.stdout);
+    const configRecords = parseGitConfigRecords(localConfig.stdout, 'local');
     for (const record of configRecords) {
       if (!record.origin.startsWith('file:')) throw new Error(`local Git config has non-file origin: ${record.origin}`);
       const origin = path.resolve(cwd, record.origin.slice('file:'.length));
@@ -351,6 +351,33 @@ export function captureGitMetadataState(cwd) {
         target,
         fingerprint: metadataFileFingerprint(target, authorities),
       };
+    }
+    const effectiveConfig = runSync('git', ['config', '--includes', '--show-origin', '--null', '--list'], { cwd });
+    if (effectiveConfig.exit !== 0) throw new Error(`cannot inspect effective Git config: ${effectiveConfig.stderr}`);
+    if (Buffer.byteLength(effectiveConfig.stdout, 'utf8') > MAX_GIT_METADATA_FILE) throw new Error('effective Git config too large');
+    files['<effective-git-config>'] = {
+      present: true,
+      sha256: crypto.createHash('sha256').update(effectiveConfig.stdout).digest('hex'),
+    };
+    const effectiveReferences = ['core.attributesfile', 'core.excludesfile'];
+    for (const key of effectiveReferences) {
+      const result = runSync('git', ['config', '--includes', '--show-origin', '--null', '--get-regexp', `^${key}$`], { cwd });
+      if (result.exit === 1 && result.stdout === '') continue;
+      if (result.exit !== 0) throw new Error(`cannot inspect effective ${key}: ${result.stderr}`);
+      const records = parseGitConfigRecords(result.stdout, 'effective');
+      if (records.length > MAX_GIT_CONFIG_REFERENCES) throw new Error('effective Git config reference limit exceeded');
+      const referenceCounts = new Map();
+      for (const record of records) {
+        if (record.key !== key) throw new Error(`unexpected effective Git config key: ${record.key}`);
+        if (!record.origin.startsWith('file:')) throw new Error(`effective Git config has non-file origin: ${record.origin}`);
+        const target = resolveGitConfigReference(cwd, record.value);
+        const ordinal = referenceCounts.get(key) ?? 0;
+        referenceCounts.set(key, ordinal + 1);
+        files[`<effective-git-config-reference>/${key}/${ordinal}`] = {
+          target,
+          fingerprint: metadataFileFingerprint(target, authorities),
+        };
+      }
     }
     for (const name of ['hooks', 'info']) {
       const directory = gitPath(cwd, name);

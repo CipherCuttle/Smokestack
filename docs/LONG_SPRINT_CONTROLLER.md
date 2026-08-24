@@ -99,7 +99,7 @@ After a task reaches a non-PASS terminal state, the host reconciles against the 
 
 Git-ignored files are outside normal porcelain scope but can still affect tests or later tasks. V0 therefore treats pre-existing ignored workspace state as immutable during a sprint.
 
-At sprint/task boundaries the host enumerates ignored entries with Git and records filesystem identity/change metadata (device/inode/mode/size/mtime/ctime plus symlink target where applicable). The controller compares those snapshots after research/lifecycle work and at final closure. Creating, deleting, replacing, or modifying an ignored entry hard-stops with `IGNORED_WORKTREE_MUTATION`; ignored state is never silently rolled back into an apparent clean checkpoint.
+At sprint/task boundaries the host enumerates ignored entries with Git and records filesystem identity/change metadata (device/inode/mode/size/mtime/ctime plus symlink target where applicable). It also binds effective Git configuration and file-valued `core.attributesFile`/`core.excludesFile` references, including references from non-local config scopes. The controller compares those snapshots after research/lifecycle work and at final closure. Creating, deleting, replacing, or modifying an ignored entry or effective metadata reference hard-stops with `IGNORED_WORKTREE_MUTATION` or Git metadata attestation failure; ignored state is never silently rolled back into an apparent clean checkpoint.
 
 This is a contamination detector, not an authorization mechanism for ignored outputs. Tasks that intentionally need generated state must use a tracked or ordinary untracked path represented by their frozen `authority.write` contract instead of relying on ignored side effects.
 

@@ -459,6 +459,51 @@ test('external attributes and excludes files are bound, while oversized referenc
   }
 });
 
+test('effective external attributes and excludes mutations fail closed', () => {
+  const cwd = createReconciliationRepo();
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-effective-config-'));
+  const previous = {
+    global: process.env.GIT_CONFIG_GLOBAL,
+    system: process.env.GIT_CONFIG_NOSYSTEM,
+  };
+  try {
+    const globalConfig = path.join(external, 'global.config');
+    const attributes = path.join(external, 'attributes');
+    const excludes = path.join(external, 'excludes');
+    fs.writeFileSync(attributes, '*.txt text\n');
+    fs.writeFileSync(excludes, 'effective-ignore.txt\n');
+    fs.writeFileSync(globalConfig, `[core]\n\tattributesFile = ${attributes}\n\texcludesFile = ${excludes}\n`);
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+
+    const tracked = path.join(cwd, 'experiments/qualification/tracked.txt');
+    const ignored = path.join(cwd, 'effective-ignore.txt');
+    fs.writeFileSync(ignored, 'external exclude target\n');
+    const before = captureGitMetadataState(cwd);
+    assert.equal(before.ok, true, JSON.stringify(before));
+    assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: set/);
+    assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 0);
+
+    fs.writeFileSync(attributes, '*.txt -text\n');
+    const afterAttributes = captureGitMetadataState(cwd);
+    assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+    assert.equal(compareGitMetadataState(before, afterAttributes).ok, false);
+
+    const excludesBefore = captureGitMetadataState(cwd);
+    fs.writeFileSync(excludes, '# external exclude removed\n');
+    const afterExcludes = captureGitMetadataState(cwd);
+    assert.equal(spawnSync('git', ['check-ignore', '-q', '--', ignored], { cwd }).status, 1);
+    assert.equal(compareGitMetadataState(excludesBefore, afterExcludes).ok, false);
+  } finally {
+    if (previous.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.global;
+    if (previous.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
 function createFilterRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-filter-'));
   runGit(cwd, ['init', '-q']);
