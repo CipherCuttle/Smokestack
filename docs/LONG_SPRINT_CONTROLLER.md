@@ -1,201 +1,118 @@
 # Long Sprint Controller V0
 
-Status: PR-00B QUALIFICATION CANDIDATE
+Status: PR-00B LIVE QUALIFICATION CANDIDATE
 
 ## Goal
 
 Provide one-command, low-attention Smokestack development sprints without transferring authority to a model.
 
-Target operator experience:
+The host controller owns task state, authority, tests, Git scope, budgets, receipts, retries, terminal decisions, and escalation. Models research, implement, and review only inside host-issued capabilities.
 
-```bash
-smokestack-sprint run <phase-contract> --mode autonomous
-```
-
-The host controller owns task state, authority, tests, Git scope, budgets, receipts, retries, terminal decisions, and escalation. Models plan, research, implement, and review only inside host-issued task capabilities.
-
-## Core architecture
+## Live topology
 
 ```text
-USER
+USER — one command
   |
-  | one command
   v
 HOST SPRINT SUPERVISOR
+  +--> deterministic task DAG / READY frontier
+  +--> host tests + Git scope + checkpoint commits
+  +--> request ceilings + receipts
   |
-  +--> task DAG / ready frontier
-  +--> budget + concurrency controller
-  +--> immutable task/phase contracts
-  +--> host tests / Git scope / hashes
-  +--> receipts + checkpoints
+  +--> RESEARCH episode
+  |      DeepSeek parent read-only
+  |      narrow literature MCP only
+  |      Codex disabled; Claude disabled
   |
-  +--> RESEARCH role: DeepSeek + narrow read-only MCP tools
-  +--> IMPLEMENT role: bounded Codex workspace writer
-  +--> REVIEW role: independent read-only Claude TEN_STACK_V1 reviewer
+  +--> LIFECYCLE episode
+         DeepSeek parent read-only
+         Codex write only during IMPLEMENT/REPAIR
+         Claude read-only only during REVIEW/REREVIEW
 ```
 
-The sprint is long-lived; individual model episodes are not. A fresh bounded model episode receives only the current task contract, relevant durable decisions/evidence, and required repository state.
+The sprint is long-lived; model episodes are bounded and replaceable.
 
-## Task modes
+## Modes
 
-### FAST
+FAST:
 
-For low-risk, mechanically testable work.
+`IMPLEMENT -> HOST VERIFY -> HOST COMMIT -> CLOSE`
 
-```text
-IMPLEMENT -> HOST VERIFY -> CLOSE
-```
+REVIEWED:
 
-### REVIEWED
+`IMPLEMENT -> HOST VERIFY -> TEN_STACK REVIEW -> [C/H only] REPAIR(1) -> RETEST -> REREVIEW(1) -> HOST COMMIT/CLOSE or BLOCK`
 
-For ordinary meaningful implementation.
+GOVERNED adds a separate MCP research episode before implementation when the task contract requires evidence.
 
-```text
-IMPLEMENT -> HOST VERIFY -> TEN_STACK REVIEW
-                         | no C/H -> CLOSE
-                         | C/H    -> REPAIR(1) -> RETEST -> REREVIEW(1) -> CLOSE/BLOCK
-```
+A model may not downgrade mode, expand write authority, weaken acceptance, extend a budget, commit its own success, or advance the DAG.
 
-### GOVERNED
+## Research / MCP boundary
 
-For scientific contracts, point-in-time semantics, security/auth, migrations, external-source semantics, architecture boundaries, and phase closure.
+The exact pinned `@deepseek-ai/dsh-mcp-client@0.1.1-rc.2` is mounted only for RESEARCH.
 
-```text
-RESEARCH/EVIDENCE (when required)
- -> FROZEN TASK CONTRACT
- -> IMPLEMENT
- -> HOST VERIFY
- -> TEN_STACK REVIEW
- -> optional single C/H repair/retest/rereview
- -> RECEIPT
- -> CLOSE/BLOCK
-```
+V0 research exposes the logical contract:
 
-Routing must be deterministic from the phase/task contract. A model may recommend a mode but may not downgrade a host-assigned mode.
+- `search_literature(query)`
+- `verify_source(id)`
 
-## Task DAG
+Research fails closed unless at least two source identities are verified and a machine-parseable evidence receipt is returned. Codex implementation and Claude review do not inherit the MCP surface.
 
-Each task has:
+The PR-00B qualification server is a deterministic local MCP fixture. Its `fixture://` sources prove MCP transport, source verification mechanics, role isolation, and autonomous continuation; they are explicitly not real scientific literature. A later real literature MCP may substitute Crossref/OpenAlex/Semantic Scholar/arXiv-style read-only sources only if it preserves stable source identity and this narrow contract.
 
-```json
-{
-  "id": "PR01_SOURCE_FIRST_BUYER_03",
-  "objective": "Qualify candidate first-buyer source",
-  "depends_on": ["PR01_UNIVERSE_FREEZE_01"],
-  "mode": "GOVERNED",
-  "authority": {
-    "write": ["experiments/qualification/**"]
-  },
-  "acceptance": [
-    "host tests pass",
-    "provider semantics recorded",
-    "direct-chain comparison exists"
-  ],
-  "research_required": true,
-  "status": "PENDING"
-}
-```
+## Request ceilings
 
-Allowed task states:
+Per GOVERNED task:
 
-`PENDING`, `READY`, `RUNNING`, `VERIFYING`, `REVIEWING`, `REPAIRING`, `REREVIEWING`, `PASS`, `BLOCKED`, `NEEDS_HUMAN`, `FAILED`.
+- RESEARCH episode: DeepSeek parent <= 8 requests;
+- LIFECYCLE episode: DeepSeek parent <= 8 requests total across implementation, review, optional repair, and optional rereview;
+- provider retries: 0;
+- implementation <= 1 before review;
+- review <= 1 before repair;
+- repair <= 1 and only after `CRITICAL_HIGH_FOUND`;
+- rereview <= 1 and only after repair;
+- whole-task replay: 0.
 
-Terminal task states are `PASS`, `BLOCKED`, `NEEDS_HUMAN`, and `FAILED`.
+Research cannot borrow lifecycle budget and the parent cannot enlarge either ceiling.
 
-## Ready-frontier rule
+## Git / checkpoint authority
 
-A task becomes `READY` only when every dependency is `PASS`.
+V0 allows one writer at a time. A task begins from a clean Git state.
 
-If a task becomes blocked, independent tasks continue. Descendants of a non-PASS dependency remain non-runnable and must not be silently skipped as successful.
+After a task reaches PASS the host:
 
-The sprint stops only when:
+1. confirms only `authority.write` paths changed;
+2. stages only those paths;
+3. re-checks staged paths;
+4. creates `sprint: <task-id>` checkpoint commit;
+5. advances the DAG.
 
-1. all tasks are `PASS`; or
-2. no runnable task remains and one or more tasks are `BLOCKED`, `NEEDS_HUMAN`, or `FAILED`; or
-3. a host budget/time/authority ceiling is reached.
-
-This avoids waking the operator for a local blocker when unrelated useful work remains.
-
-## Bounded repair
-
-Per task:
-
-- implementation calls <= 1 before review;
-- independent reviews <= 1 before repair;
-- repair calls <= 1 and only after `CRITICAL_HIGH_FOUND`;
-- rereviews <= 1 and only after repair;
-- automatic whole-task replay = 0 unless the failure is an explicitly classified infrastructure failure and a separate host retry budget authorizes it;
-- a second C/H after the one rereview closes the task `BLOCKED`.
-
-No reviewer finding can extend these ceilings.
-
-## Checkpoints and durable context
-
-Sprint state lives outside model context and is append-only where practical:
-
-```text
-.sprint/<sprint-id>/
-  SPRINT_CONTRACT.json
-  TASK_DAG.json
-  DECISIONS.jsonl
-  ASSUMPTIONS.jsonl
-  EVIDENCE.jsonl
-  EVENTS.jsonl
-  CHECKPOINT.json
-  RECEIPTS/
-```
-
-A new model episode receives a compact task capsule derived from these records. It does not receive a multi-hour conversation transcript.
-
-## Evidence / MCP boundary
-
-Research MCPs are read-only and narrow. V0 target capabilities:
-
-- search papers/documents;
-- fetch metadata by stable identifier;
-- fetch references/citations;
-- search official documentation;
-- read-only GitHub lookup when explicitly required.
-
-Research results are normalized into claim receipts containing stable identifiers/URLs and retrieval metadata before they enter implementation/review context.
-
-The implementation worker does not inherit the broad research MCP surface.
-
-## Concurrency
-
-V0 qualification begins with one writer at a time. Read-only research/review may later overlap with an independent task only after worktree isolation and integration reconciliation are proven.
-
-Never run two writers in the same worktree.
+A model never creates the success checkpoint. Unauthorized writes are fail-closed.
 
 ## Human escalation
 
-A task becomes `NEEDS_HUMAN` for authority questions such as:
+The controller does not autonomously authorize frozen scientific-semantic changes, weakened acceptance, new credential domains, spend/time expansion, publication, protected-branch merge, destructive non-disposable operations, or unresolved canonical source conflicts. Independent READY work may continue until the executable frontier is exhausted.
 
-- changing frozen scientific semantics;
-- weakening acceptance criteria;
-- materially expanding product scope;
-- reading a new secret or credential domain;
-- increasing spend/time ceiling;
-- publishing externally;
-- merging a protected branch;
-- deleting non-disposable data;
-- unresolved canonical source conflict.
+## PR-00B live qualification
 
-Other READY tasks continue. The operator sees one consolidated terminal report when the executable frontier is exhausted.
+The disposable live sprint has four dependent tasks:
 
-## PR-00B qualification target
+1. FAST deterministic normalization;
+2. REVIEWED first-wins dedupe;
+3. GOVERNED point-in-time filter with separate MCP research;
+4. REVIEWED integration summary depending on tasks 2 and 3.
 
-Before any model-backed long sprint, prove with zero-model deterministic selftests:
+PASS requires zero human intervention, all four tasks PASS, actual MCP initialize/list/call compatibility, read-only research, host tests, unambiguous TEN_STACK gates, zero unauthorized writes, bounded repair/rereview if triggered, four host checkpoint commits, a clean final worktree, and a deterministic final receipt.
 
-- DAG validation and cycle rejection;
-- deterministic READY frontier;
-- blocked-node skipping while independent work continues;
-- dependency descendants never run after non-PASS prerequisites;
-- FAST / REVIEWED / GOVERNED lifecycle legality;
-- C/H-only repair authorization;
-- one repair and one rereview maximum;
-- second repair/rereview rejection;
-- deterministic terminal sprint state;
-- stable checkpoint/receipt generation.
+GitHub Actions runs only zero-model syntax/control tests. Native Codex/Claude subscription authentication and OpenRouter model spend are exercised only by the local live qualification.
 
-After this passes, wire the already-qualified PR-00A DSH executor topology into the controller. MCP research is a separate adapter with a narrow allowlist and must not enlarge implementer/reviewer authority.
+Run:
+
+```bash
+cd ~/DevHub/repos/Smokestack \
+&& git pull --ff-only \
+&& source "$HOME/.nvm/nvm.sh" \
+&& nvm use 24.19.0 \
+&& node tooling/sprint/qualification/qualification.mjs
+```
+
+The runner installs the exact pinned DSH MCP client into the isolated headless profile if it is absent.
