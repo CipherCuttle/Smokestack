@@ -29,6 +29,9 @@ jobs:
       - name: Check
         run: npm run check
 
+      - name: Long-sprint controller selftest
+        run: node --test tooling/sprint/sprint-selftest.mjs
+
       - name: Foundation fail-closed status
         run: |
           npm run smokestack -- status | tee /tmp/status.json
