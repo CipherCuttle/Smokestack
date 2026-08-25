@@ -1,0 +1,318 @@
+{
+  "contract_id": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V1",
+  "phase": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V1",
+  "state": "PREREGISTERED_NOT_EXECUTED",
+  "canonical_predecessor": "42bc8003b280affc8da0bb484ea9468da32bb656",
+  "supersedes_failed_v0": "bb8696bc74b660ec1ed34f404493bf05035a9b2a",
+  "v0_terminal_verdict": "TERMINAL_FAIL_CLOSED",
+  "recorded_at": "2026-08-25",
+  "stage_1_gates": {
+    "successful_parse_rate": {"operator": ">=", "threshold": 0.995},
+    "schema_violations": {"operator": "<=", "threshold": 0.005},
+    "market_legible_universe_coverage": {"operator": ">=", "threshold": 0.95},
+    "p95_discovery_latency_seconds": {"operator": "<=", "threshold": 120},
+    "first_buyer_availability": {"operator": ">=", "threshold": 0.95},
+    "audited_first_buyer_identity_order_agreement": {"operator": ">=", "threshold": 0.99},
+    "undocumented_semantic_shifts": {"operator": "=", "threshold": 0}
+  },
+  "universe": {
+    "id": "SOLANA_UNIVERSE_CANDIDATE_V0",
+    "chain_id": "solana-mainnet-beta",
+    "asset_object": "fungible SPL Token or Token-2022 mint that is the non-quote side of a newly initialized Raydium CPMM pool",
+    "canonical_identity_key": ["chain_id", "mint_address"],
+    "names_symbols_are_identity": false,
+    "market_program": {
+      "name": "raydium-cp-swap",
+      "program_id": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+      "initialization_instructions": ["Initialize", "InitializeWithPermission"],
+      "decoder_source_commit": "raydium-io/raydium-cp-swap@244e1241f3c8d90eb93f176dfbc35f2605ec5a5c",
+      "initialization_discriminators": {
+        "Initialize": "afaf6d1f0d989bed",
+        "InitializeWithPermission": "3f37fe4131b25979"
+      }
+    },
+    "quote_mints": [
+      "So11111111111111111111111111111111111111112",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    ],
+    "token_programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+    ],
+    "observation_window": {
+      "duration": "7x24h",
+      "start": "first UTC midnight after future host execution authorization",
+      "end": "start + 7 days",
+      "census_close": "end + 30 minutes"
+    },
+    "membership_evidence": {
+      "purpose": "CENSUS_UNIVERSE_ELIGIBILITY_TRUTH only; it is not MARKET_STATE evidence",
+      "required_fields": [
+        "finalized successful initialization signature",
+        "finalized slot and full-block transaction index",
+        "outer and nested initialization instruction path",
+        "frozen CPMM program/discriminator match",
+        "canonical pool account identity",
+        "canonical mint pair identity",
+        "candidate mint is the single non-quote mint",
+        "positive initialization amounts"
+      ],
+      "not_required_fields": [
+        "market_state_request_success",
+        "market_state_response",
+        "market_state_raw_response_hash",
+        "market_state_field_validity"
+      ],
+      "failure_behavior": "a failure of the later MARKET_STATE operation never removes an otherwise qualifying census member"
+    },
+    "inclusion": [
+      "finalized successful Initialize or InitializeWithPermission invokes the frozen CPMM program",
+      "distinct sorted mint pair has exactly one fixed-set quote mint and one non-quote mint",
+      "init_amount_0 > 0 and init_amount_1 > 0",
+      "minimal membership evidence is complete",
+      "the first qualifying finalized CPMM initialization for the canonical mint identity is inside the window"
+    ],
+    "exclusion": [
+      "failed transaction",
+      "non-CPMM or non-initialization event",
+      "two quote mints, two non-quote mints, identical mints, or unsupported token owner",
+      "zero initialization amount",
+      "incomplete minimal membership evidence",
+      "an earlier qualifying initialization exists before window_start",
+      "unresolvable identity collision"
+    ],
+    "newly_active_history": {
+      "lower_boundary": "Solana genesis slot 0, inclusive",
+      "pre_window_exclusion": "any earlier qualifying initialization excludes the mint; later pools are duplicates",
+      "missing_history": "archive/pruning gap, unresolved page, null required membership primitive, or unavailable prior-history check yields NEWLY_ACTIVE_HISTORY_COMPLETE=NO and invalidates the packet",
+      "completeness": "all finalized frozen-program history through census_close must close at the genesis boundary before the denominator is valid"
+    },
+    "raydium_initialization_time_semantics": {
+      "INITIALIZE_OPEN_TIME_ARGUMENT": "u64 instruction argument decoded after the frozen discriminator",
+      "INITIALIZED_POOL_STATE_OPEN_TIME": "the program may store Clock unix_timestamp + 1 when the argument is not later than that clock; this stored field is not reconstructed by a later mutable-state read",
+      "INITIALIZATION_CLOCK_UNIX_TIMESTAMP": "the runtime Clock value used by the program, distinct from RPC blockTime",
+      "LATER_CURRENT_POOL_STATE": "never read for eligibility, newly-active classification, market legibility, or audit population",
+      "eligibility_rule": "membership uses the frozen initialization event and history rules; a required initialization primitive that cannot be reconstructed is UNAVAILABLE_OR_INVALID"
+    },
+    "timestamps": {
+      "source_event_at": "non-null finalized transaction blockTime",
+      "source_slot_or_block": "finalized slot plus transaction-array index",
+      "eligibility_knowledge_at": "fetched_at of first complete finalized census evidence",
+      "fetched_at": "provider observation/knowledge time, distinct from source_event_at",
+      "recorded_at": "local evidence persistence time",
+      "decision_boundary": "eligibility_knowledge_at",
+      "rule": "later corrections append evidence and cannot rewrite a sealed timestamp or make a current snapshot historical"
+    },
+    "duplicates_aliases_migrations": {
+      "dedupe": "retain earliest by slot, transaction index, instruction path, and signature bytes; later pools are linked duplicates",
+      "aliases": "metadata aliases, symbols, names, logos, and provider IDs are ignored",
+      "migration": "a new mint address is a new asset",
+      "conflict": "AMBIGUOUS or UNAVAILABLE_OR_INVALID, never guessed"
+    },
+    "complete_chain_census": {
+      "enumeration_target": "getSignaturesForAddress(CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C) at finalized commitment",
+      "observation_range": "all finalized program history from slot 0 through the last finalized slot at census_close; membership is restricted to the window and prior-history exclusion uses genesis through window_start",
+      "pagination": "newest-to-oldest limit=1000 pages, each next page uses the prior last signature as before; until is not used to hide history",
+      "termination": "empty page after a strictly older cursor or genesis boundary; repeated cursor, non-decreasing slot, unexplained gap, or ceiling before closure fails completeness",
+      "finalized_evidence_mapping": "resolve every required signature and verify its containing block and transaction index; retain response hashes",
+      "prior_history_check": "group all decoded qualifying events by canonical mint and retain only earliest-in-window mints",
+      "completeness_accounting": "retain pages, cursors, signatures, slots, resolutions, candidate/exclusion/unavailable counts, gaps, retries, bytes, credits, and cost",
+      "fail_closed": "archive/pruning, null required primitive, provider gap, rate limit, timeout, malformed response, or unresolved account evidence makes CENSUS_COMPLETE=NO; it never shrinks the denominator",
+      "resource_ceiling": "a ceiling before termination proof yields PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO"
+    }
+  },
+  "providers": [
+    {
+      "provider_id": "HELIUS_LASERSTREAM_GRPC_MAINNET_V0",
+      "role": "DISCOVERY",
+      "product_api_family": "Helius LaserStream gRPC transactionUpdate filtered to Raydium CPMM initialization",
+      "documentation_urls": ["https://www.helius.dev/docs/laserstream/grpc", "https://www.helius.dev/docs/billing/rate-limits", "https://www.helius.dev/pricing", "https://www.helius.dev/terms"],
+      "authentication": "Helius account/API credential required later; none is present or read now",
+      "temporal_semantics": "finalized raw transaction event; LIVE_FIRST_OBSERVATION is the first continuously connected observation, REPLAY_RECOVERY is never a successful latency observation, and provider-created timestamps are never host receipt time",
+      "receipt_clock_contract": "V1_RECEIPT_CLOCK_V1",
+      "schema_version": "Yellowstone/gRPC schema and deployed revision pinned before execution; current revision UNKNOWN_TO_BE_MEASURED",
+      "rate_limits_pricing": "plan limits and public paid reference are documented; exact filtered-stream delivery, credits, completeness, and cost are UNKNOWN_TO_BE_MEASURED",
+      "evidence_classification": {"DOCUMENTED": ["transaction monitoring", "program filters", "historical replay", "plan limits"], "INFERRED": ["raw delivery can be decoded with the pinned Raydium decoder"], "UNKNOWN_TO_BE_MEASURED": ["completeness", "latency", "disconnect loss", "replay overlap", "schema revision"]}
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_CENSUS_V1",
+      "role": "CENSUS_UNIVERSE_ELIGIBILITY",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC getSignaturesForAddress/getBlock/getTransaction for exhaustive minimal CPMM event census",
+      "documentation_urls": ["https://solana.com/docs/rpc/http/getsignaturesforaddress", "https://solana.com/docs/rpc/http/getblock", "https://solana.com/docs/rpc/http/gettransaction", "https://solana.com/docs/rpc/json-structures", "https://www.quicknode.com/docs/solana/api-overview"],
+      "authentication": "separately controlled QuickNode endpoint/API key required later",
+      "temporal_semantics": "finalized slot, transaction-array index, instruction path, and immutable initialization event fields; no later current PoolState read",
+      "request_role_boundary": "this operation establishes only membership_evidence; it does not establish MARKET_STATE and is not counted as a MARKET_STATE success",
+      "rate_limits_pricing": "plan/RPS/archive and credit terms are documented at plan level; exact census availability and cost are UNKNOWN_TO_BE_MEASURED",
+      "evidence_classification": {"DOCUMENTED": ["finalized JSON-RPC methods and response fields", "QuickNode Solana endpoint capability"], "INFERRED": ["pinned raw RPC plus Raydium decoder can establish minimal event identity"], "UNKNOWN_TO_BE_MEASURED": ["historical completeness", "provider availability", "archive behavior", "cost"]}
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_MARKET_STATE_V1",
+      "role": "MARKET_STATE",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC, a separately scheduled per-asset raw initialization-evidence operation using getTransaction/getBlock and required account/instruction evidence",
+      "documentation_urls": ["https://solana.com/docs/rpc/http/getblock", "https://solana.com/docs/rpc/http/gettransaction", "https://solana.com/docs/rpc/json-structures", "https://docs.raydium.io/products/cpmm", "https://github.com/raydium-io/raydium-cp-swap/tree/244e1241f3c8d90eb93f176dfbc35f2605ec5a5c", "https://www.quicknode.com/docs/solana/api-overview"],
+      "authentication": "QuickNode endpoint/API key required later; no credential is present or read now",
+      "pricing": "public QuickNode free/paid plan references; no spend is authorized and exact selected-operation credits/cost are UNKNOWN_TO_BE_MEASURED",
+      "terms_constraint": "QuickNode API-credit, account-use, and permitted raw-evidence-retention terms must be confirmed before execution",
+      "temporal_semantics": "the claim is the frozen initialization-time state at the eligible event's finalized slot, not a current snapshot; requests are triggered when the minimal census row becomes eligible, with fetched_at recording knowledge time",
+      "request_trigger": "one independent market-state request sequence per eligible universe member, started within 30 seconds of eligibility_knowledge_at; later backfill is LATE and cannot become a valid contemporaneous observation",
+      "fetched_at": "host UTC knowledge timestamp captured at request/response handling; never substituted for source_event_at",
+      "exact_fields": {
+        "pool_account": "PoolState account bound by the initialization instruction",
+        "candidate_mint": "canonical non-quote mint and its frozen token-program identity",
+        "quote_mint": "one member of the fixed quote-mint set",
+        "vault_accounts": "both vault accounts bound by the initialization instruction",
+        "positive_initialization_amounts": "both decoded initialization amounts are strictly positive",
+        "initialize_open_time_argument": "the decoded u64 initialization argument",
+        "initial_status": "known zero-initialized PoolState status under the pinned Raydium source semantics",
+        "finalized_event_binding": "signature, slot, block transaction index, discriminator, instruction path, and non-null blockTime"
+      },
+      "validity": "AVAILABLE only when this operation independently receives and validates every required field, joins to the correct eligible identity and initialization boundary, and hashes the raw response; census success cannot substitute for it",
+      "response_statuses": ["AVAILABLE", "UNAVAILABLE", "MALFORMED", "TIMEOUT", "UNSUPPORTED"],
+      "missing_behavior": "every non-AVAILABLE status remains attached to the eligible asset and remains in the coverage denominator",
+      "pagination": "no market pagination; at most eight bounded raw RPC calls per asset; no response is silently truncated",
+      "rate_limits": "QuickNode plan/RPS/archive/credit terms apply; exact operation availability and cost are UNKNOWN_TO_BE_MEASURED",
+      "schema_version": "standard Solana JSON-RPC response schema with encoding, commitment, maxSupportedTransactionVersion, pinned Raydium decoder commit, and harness parser identity bound before execution; deployed endpoint revision UNKNOWN_TO_BE_MEASURED",
+      "shared_backend": "shares QuickNode infrastructure with census and DIRECT_CHAIN_AUDIT; no provider independence claim is made for this role",
+      "prohibited": ["later mutable PoolState snapshot", "current price, volume, return, survival, attention, or outcome fields", "reusing a census response or treating census completion as market-state success"],
+      "evidence_classification": {"DOCUMENTED": ["Solana finalized transaction/block response fields", "QuickNode mainnet archive JSON-RPC capability", "Raydium CPMM scope and instruction family"], "INFERRED": ["a separately scheduled raw request can reconstruct the frozen initialization-time field set"], "UNKNOWN_TO_BE_MEASURED": ["per-case availability", "archive completeness", "latency to request", "schema drift", "cost", "terms for raw retention"]}
+    },
+    {
+      "provider_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+      "role": "FIRST_BUYER",
+      "product_api_family": "Helius Enhanced Transactions legacy V1 history endpoint",
+      "documentation_urls": ["https://www.helius.dev/docs/api-reference/enhanced-transactions/gettransactions", "https://www.helius.dev/docs/billing/rate-limits", "https://www.helius.dev/docs/billing/credits", "https://www.helius.dev/pricing", "https://www.helius.dev/terms"],
+      "authentication": "Helius API key required later; none is present or read now",
+      "pagination": "documented history pagination, maximum 20 pages per asset",
+      "ordering": "provider ordering is a claim only; direct chain order decides truth",
+      "semantics": "V0 first-buyer semantics carry forward unchanged: successful single-hop CPMM swap, positive net candidate-mint transfer to the recipient owner, routed/multi-hop and ambiguous cases unavailable",
+      "evidence_classification": {"DOCUMENTED": ["parsed swap/transfer history, pagination, V1/V2 distinction, rate limits"], "INFERRED": ["pool-address history can expose a candidate claim"], "UNKNOWN_TO_BE_MEASURED": ["availability, parser completeness, ordering fidelity, semantic drift"]}
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+      "role": "DIRECT_CHAIN_AUDIT",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC getSignaturesForAddress/getBlock/getTransaction and required account reads",
+      "documentation_urls": ["https://solana.com/docs/rpc/http/getblock", "https://solana.com/docs/rpc/http/gettransaction", "https://solana.com/docs/rpc/json-structures", "https://www.quicknode.com/docs/solana/api-overview", "https://www.quicknode.com/pricing", "https://www.quicknode.com/pt/terms"],
+      "authentication": "separate QuickNode endpoint/API key or account credential required later",
+      "ordering": "finalized slot, full getBlock transaction-array order, outer/CPI instruction path, and signature-byte duplicate tie-breaker",
+      "semantics": "raw chain-native derivation only; never Helius output, a cache, aggregator, wrapper, or provider first-buyer ordering",
+      "evidence_classification": {"DOCUMENTED": ["standard finalized JSON-RPC methods and fields, QuickNode Solana capability"], "INFERRED": ["raw JSON-RPC plus pinned Raydium decoder is an independent truth path"], "UNKNOWN_TO_BE_MEASURED": ["archive completeness, availability, method credits, endpoint revision"]}
+    }
+  ],
+  "receipt_clock": {
+    "id": "V1_RECEIPT_CLOCK_V1",
+    "frozen": true,
+    "clock_domains": ["CHAIN_EVENT_TIME", "HOST_WALL_RECEIPT_UTC", "HOST_MONOTONIC_RECEIPT", "WALL_MONOTONIC_OFFSET"],
+    "start_binding": "at qualification process start capture wall_start_utc and mono_start_ns in one synchronous section, with no await or blocking work between the two reads",
+    "observation_binding": "for each LIVE_FIRST_OBSERVATION at callback entry capture wall_received_utc and mono_received_ns synchronously, without await; retain the raw pair and sampled offset",
+    "predicted_wall_received_utc": "wall_start_utc + (mono_received_ns - mono_start_ns)",
+    "clock_skew_tolerance": {"value": 0.25, "unit": "seconds", "justification": "250 ms is below 0.21% of the 120-second latency gate and bounds receipt-clock error at a sub-second scale relevant to provider freshness"},
+    "validity_rules": [
+      "mono_received_ns >= mono_start_ns",
+      "abs(wall_received_utc - predicted_wall_received_utc) <= 0.25 seconds",
+      "source_event_at is non-null and discovery_latency_seconds = wall_received_utc - source_event_at is finite and >= 0",
+      "negative latency is INVALID_CLOCK and is never clamped or counted",
+      "a wall/monotonic offset discontinuity above 0.25 seconds makes the affected interval INVALID_CLOCK"
+    ],
+    "checkpoints": {
+      "cadence": "every 100 milliseconds by monotonic schedule",
+      "required_pairs": ["start", "each cadence checkpoint", "before each receipt batch when batching exists", "after each receipt batch when batching exists", "final"],
+      "interval_rule": "compare each checkpoint offset with the immediately preceding checkpoint; a change above 0.25 seconds invalidates all receipt observations in the affected interval and the interval is retained",
+      "transient_step_rule": "a step that is visible in any checkpoint or observation pair is invalid; start/end-only comparison is never sufficient; a wholly unobserved sub-cadence step cannot be inferred from timestamps and does not become a valid successful latency",
+      "implementation_determinism": "the validity decision is a pure function of the frozen timestamp pairs, source_event_at, tolerance, and checkpoint interval labels"
+    },
+    "latency_population": "only LIVE_FIRST_OBSERVATION with a valid clock and non-null chain event time may enter p95; replay, duplicate, late, timeout, unavailable, malformed, unsupported, and invalid-clock cases remain visible and do not enter the success numerator"
+  },
+  "first_buyer_semantics": {
+    "frozen": true,
+    "qualifying_acquisition": "successful single-hop Raydium CPMM SwapBaseInput or SwapBaseOutput transferring positive net candidate-mint amount from pool vault to one recipient token-account owner and positive quote amount into the paired pool vault",
+    "success": "meta.err == null; missing explicit success is unavailable",
+    "wallet_identity": "owner of recipient SPL Token/Token-2022 account, not token-account address, fee payer, pool authority, program, mint authority, or fee account",
+    "excluded": ["Initialize", "Deposit", "Withdraw", "fee collection", "mint", "burn", "direct transfer", "airdrop", "LP movement", "self-transfer", "Jupiter/Raydium routed or multi-hop transaction"],
+    "duplicates": "aggregate same-owner transfer rows within one qualifying swap; later acquisitions do not change first buyer",
+    "ambiguous": "multiple positive recipient owners, missing owner, missing required instruction path, or identity collision",
+    "unavailable": "provider/chain failure, missing field, failed transaction, unsupported parser, or ambiguity"
+  },
+  "chain_order": {
+    "frozen": true,
+    "order_key": ["finalized_slot", "getBlock_transaction_array_index", "outer_instruction_index", "inner_instruction_index", "nested_instruction_path", "signature_bytes_duplicate_tiebreaker"],
+    "ambiguous_or_missing": "UNAVAILABLE_OR_INVALID; never guessed"
+  },
+  "audit_population": {
+    "frozen": true,
+    "definition": "every distinct canonical asset in the closed complete universe snapshot with complete outcome-independent mint, pool, initial signature, slot, and vault identity fields",
+    "provider_absence_removes_case": false,
+    "forbidden_filters": ["provider success/failure", "parse result", "first-buyer answer", "chain agreement", "price", "volume", "survival", "attention"]
+  },
+  "audit_sampling": {
+    "snapshot": "full universe ledger at window end + 30 minutes, canonical bytes and SHA-256 committed before first-buyer or audit result inspection",
+    "sample_size": "min(200,N)",
+    "replacement": "without replacement; no discretionary replacement",
+    "seed": "smokestack:pr01:source-qualification:audit-v1",
+    "selector": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity), unsigned hexadecimal byte sort, first min(200,N)",
+    "unavailable_selected_case": "retained in sample and denominator"
+  },
+  "denominators": {
+    "logical_case_rule": "one stable scheduled case ID; retries are attempts and duplicates do not add rows",
+    "market_state": {
+      "numerator": "count of eligible universe members with status AVAILABLE and every exact market-state field valid from the independent market-state operation",
+      "denominator": "all eligible universe members in the closed complete census",
+      "formula": "market_legible_universe_coverage = valid_MARKET_STATE_observations / eligible_universe_members",
+      "statuses": "UNAVAILABLE, MALFORMED, TIMEOUT, UNSUPPORTED, late, invalid, and request failure remain in denominator and are not numerator",
+      "zero": "zero denominator is NOT_REPORTABLE and cannot pass"
+    },
+    "parse": {"numerator": "complete valid expected schema and mandatory fields", "denominator": "all scheduled logical cases for the role", "failure": "invalid, malformed, timeout, unavailable, late, and unsupported fail parse; retries do not change denominator"},
+    "schema": {"numerator": "logical case with a non-duplicate payload violating frozen schema/mandatory fields", "denominator": "all scheduled logical cases for the role", "failure": "timeout without payload is parse failure but not schema violation; duplicate conflict is schema evidence"},
+    "discovery_latency": {"numerator": "finite non-negative event-to-host-receipt seconds from LIVE_FIRST_OBSERVATION with valid receipt clock", "denominator": "every frozen-universe asset", "failure": "invalid-clock, replay, duplicate, late, missing, timeout, unavailable, or null blockTime remains visible and is not a successful latency observation; p95 index is ceil(0.95*N)-1"},
+    "first_buyer_availability": {"numerator": "unambiguous first-buyer answer satisfying frozen semantics", "denominator": "every audit-eligible asset", "failure": "all unavailable, malformed, ambiguous, provider-failure, and chain-audit-failure states remain denominator"},
+    "audit_agreement": {"numerator": "selected Helius identity and order exactly match QuickNode-derived chain truth", "denominator": "every committed selected case", "failure": "unavailable, malformed, ambiguous, provider-failure, chain-audit-failure, and disagreement are not success; no replacement"},
+    "zero_population": "all zero denominators are NOT_REPORTABLE and cannot pass"
+  },
+  "source_role_independence": {
+    "first_buyer_source_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+    "direct_chain_audit_source_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+    "market_state_source_id": "QUICKNODE_SOLANA_MAINNET_RPC_MARKET_STATE_V1",
+    "ids_must_differ": true,
+    "audit_rule": "direct audit uses only separately controlled QuickNode raw chain evidence and pinned Raydium interpretation; never Helius output or a derived/re-exported first-buyer dataset",
+    "shared_backend_rule": "census, market-state, and direct audit may share QuickNode infrastructure; this is disclosed and no independence is claimed for market-state"
+  },
+  "execution_shape": {
+    "evaluation_order": ["complete_chain_census_snapshot", "live_discovery_and_receipt_clock", "per-asset_market_state_request", "first_buyer", "direct_chain_audit_sample", "gate_calculation"],
+    "request_ceilings": {"laserstream_connections": 1, "laserstream_reconnects": 10, "laserstream_replay_minutes_per_reconnect": 15, "helius_history_pages_per_asset": 20, "market_state_raw_rpc_calls_per_asset": 8, "quicknode_signature_pages": 50000, "quicknode_raw_rpc_calls_total": 100000},
+    "market_state_trigger_ceiling": "one scheduled sequence per eligible asset; at most eight raw RPC calls, two retries per retryable call, and 30 seconds from eligibility_knowledge_at to first request",
+    "retry_count": 2,
+    "retryable": ["408", "429", "5xx", "transport"],
+    "non_retryable": ["400", "401", "403", "404", "schema_error"],
+    "timeouts_seconds": {"stream_operation": 30, "http_request": 10},
+    "concurrency": {"stream": 1, "helius_history": 4, "quicknode": 8},
+    "raw_evidence": "retain permitted request/response bytes or immutable reference, SHA-256, source identity, schema/parser identity, timestamps, attempts, result classification, and cost for at least 24 months",
+    "parser_identity": "later harness commit, Node/npm, contract digest, schema revisions, and parser version bound before first request; post-request change creates a new packet",
+    "cost_accounting": "record plan, fixed fee, credits, requests, retries, bytes, overages, and invoice/usage evidence per source",
+    "failure_preservation": "never delete, hide, or denominator-edit failed, late, duplicate, unavailable, invalid, or selected cases"
+  },
+  "authorization": {
+    "measurement_authorized": false,
+    "live_provider_execution_authorized": false,
+    "paid_provider_spend_authorized": false,
+    "secret_read_authorized": false,
+    "solana_rpc_execution_authorized": false,
+    "database_started": false,
+    "detector_started": false,
+    "pr02_started": false
+  },
+  "exit": {
+    "allowed_state": "PREREGISTERED_NOT_EXECUTED",
+    "source_stack_qualified": false,
+    "census_complete_required_for_valid_packet": true,
+    "next_gate": "PR01_PREREG_V1_INDEPENDENT_REVIEW",
+    "pr02": "NOT_STARTED"
+  },
+  "non_execution_attestation": {
+    "live_provider_execution": false,
+    "source_measurement_run": false,
+    "secret_read": false,
+    "solana_rpc_call": false,
+    "paid_provider_spend": false,
+    "source_stack_qualified": false
+  }
+}
