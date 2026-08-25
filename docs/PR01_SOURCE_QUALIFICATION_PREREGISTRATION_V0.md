@@ -7,7 +7,7 @@
 - Predecessor: `42bc8003b280affc8da0bb484ea9468da32bb656`
 - Preregistration recorded at: `2026-08-25T19:37:26Z`
 - Machine-readable contract: `experiments/qualification/pr01-source-qualification-prereg-v0.json`
-- Machine-readable contract SHA-256: `6ee5cb453262fa4ca192624ff756cc31b05b8ce870b398748c31b1e6964416bb`
+- Machine-readable contract SHA-256: `4a99253413a999bffdbd313c576ec43a0ab5eb827e64b2df0e111e8189ee8a8b`
 - `MEASUREMENT_AUTHORIZED = NO`
 - `LIVE_PROVIDER_EXECUTION_AUTHORIZED = NO`
 - `PAID_PROVIDER_SPEND_AUTHORIZED = NO`
@@ -34,8 +34,8 @@ The exact Stage-1 gates remain unchanged:
 | Schema violations | `<=0.5%` |
 | Market-legible universe coverage | `>=95%` |
 | p95 discovery latency | `<=120 seconds` |
-| First-buyer availability | `>=95%` of eligible assets |
-| Audited first-buyer identity/order agreement | `>=99%` with direct-chain truth |
+| First-buyer availability | `>=95% of eligible assets` |
+| Audited first-buyer identity/order agreement | `>=99% with direct-chain truth` |
 | Undocumented semantic shifts | `0` |
 
 No observed result exists. The phase cannot output `SOURCE_STACK_QUALIFIED`.
@@ -55,6 +55,12 @@ No observed result exists. The phase cannot output `SOURCE_STACK_QUALIFIED`.
   symbols, metadata, pool addresses, and provider IDs are never identity keys.
 - The only market program in V0 is Raydium CPMM:
   `CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C`.
+- The V0 decoder boundary is the frozen program address plus
+  `raydium-io/raydium-cp-swap@244e1241f3c8d90eb93f176dfbc35f2605ec5a5c`.
+  The only initialization discriminators are `Initialize =
+  afaf6d1f0d989bed` and `InitializeWithPermission = 3f37fe4131b25979`.
+  An upgrade or invocation not proven to implement this boundary is
+  `UNAVAILABLE_OR_INVALID` and prevents census completeness.
 - A quote mint is one of these fixed public keys: wrapped SOL
   `So11111111111111111111111111111111111111112`, USDC
   `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, or USDT
@@ -73,18 +79,62 @@ earliest finalized successful transaction in the observation window that:
 3. has exactly one non-quote mint and exactly one quote mint from the fixed
    quote set;
 4. supplies positive `init_amount_0` and `init_amount_1` in the instruction;
-5. has a complete pool state, both vault accounts, both mint accounts, and the
-   token-program owners in the same finalized chain evidence; and
-6. has the pool swap operation enabled (`status` swap-disabled bit clear) and
-   `open_time <= blockTime` for the initialization transaction.
+5. has complete finalized initialization-time pool, vault, mint, and
+   token-program evidence; and
+6. has the known initialization-time `PoolState.status = 0` (therefore the
+   swap-disabled bit is clear), and a decodable `INITIALIZE_OPEN_TIME_ARGUMENT`
+   no later than non-null initialization `blockTime`.
 
-The non-quote mint is the candidate asset. Positive initialization amounts and
-the on-chain swap-enabled state are market-legibility conditions known at the
-eligibility event; no later price, return, volume, survival, attention, or
-successful-trade outcome is used.
+The non-quote mint is the candidate asset. Positive initialization amounts, the
+known initialization-time status, and the argument/event-time rule are
+market-legibility conditions known at the eligibility event. The stored
+`PoolState.open_time` is not compared to `blockTime`: Raydium rewrites that
+field during normal initialization. No later price, return, volume, survival,
+attention, or successful-trade outcome is used.
 
 The canonical census is built from raw chain evidence. A discovery provider
 may miss an asset; that absence never changes the universe denominator.
+
+### Complete independent chain census
+
+The census target is the exact CPMM program address above, enumerated with
+standard finalized `getSignaturesForAddress`. The observation range is all
+finalized program history from genesis slot `0` through the last finalized slot
+whose `blockTime` is not later than `census_close`. Candidate inclusion is
+restricted to `[window_start, window_end]`; the complete `[genesis,
+window_start)` history is required for the pre-window newly-active exclusion.
+The future harness resolves and records UTC-to-slot boundaries using a bounded
+binary search over finalized `getBlockTime`/`getBlock`; a null or non-monotonic
+boundary primitive is invalid.
+
+Pagination is newest-to-oldest with `limit = 1000`. The first page has no
+`before` cursor; each next page uses the preceding page’s last signature as
+`before`, and no `until` cursor may hide earlier history. Signatures are
+deduplicated globally by bytes while retaining every page/cursor occurrence.
+Every required signature is resolved to finalized `getTransaction` evidence
+and its containing finalized `getBlock`; the signature must occur exactly once
+at the reported transaction-array index. The harness retains `meta.err`,
+`blockTime`, account keys, instruction paths, response hashes, and the complete
+ordered block position.
+
+Only the two pinned eight-byte Raydium initialization discriminators are
+decoded. Candidate extraction verifies the frozen account metas, little-endian
+u64 arguments, sorted distinct mints, fixed quote set, token-program owners,
+positive amounts, pool/vault identities, and initialization-time status/open-
+time evidence. After all history is decoded, records are grouped by canonical
+mint; only a mint whose earliest qualifying initialization is in the window
+survives.
+
+`CENSUS_COMPLETE = YES` only when every required pagination interval is closed,
+no cursor/page gap exists, every required block/transaction primitive is
+resolved, all prior-history checks complete, no required archive range is
+unavailable, and no request ceiling was reached before proof of termination.
+The ledger records page count, cursors, unique signatures, slot range,
+resolutions, discriminator/candidate/exclusion/unavailable counts, prior-
+history checks, gaps, nulls, retries, requests, bytes, credits, and cost. Any
+archive/pruning, null required primitive, provider gap, rate limit, timeout,
+malformed response, or unresolved account evidence makes
+`CENSUS_COMPLETE = NO`; a partial census is never a smaller denominator.
 
 ### Exclusion rule
 
@@ -98,8 +148,9 @@ lineage rather than silently discarded:
   universe-creating event;
 - two quote mints, two non-quote mints, identical mints, missing mint account,
   or an unsupported token-program owner;
-- zero initialization amount, swap-disabled status, or an initialization
-  whose open time is after its event block time;
+- zero initialization amount, an initialization-time status/evidence failure,
+  or an `INITIALIZE_OPEN_TIME_ARGUMENT` after event `blockTime` (a null event
+  time is unavailable, not an exclusion);
 - an identity collision that cannot be resolved to one `(chain_id, mint)` key.
 
 These exclusions are protocol exclusions, never provider-absence exclusions.
@@ -114,9 +165,33 @@ the first UTC midnight after a future host execution authorization is recorded;
 its end is exactly seven days later. The census closes at end plus a fixed
 30-minute finality/census grace period.
 
-“Newly active” means the first qualifying CPMM initialization for the mint in
-that window. If a mint has an earlier qualifying initialization in the same
-chain census, a later pool is a duplicate and cannot make the mint newly active.
+“Newly active” means the mint’s first qualifying CPMM initialization across the
+complete frozen program history, not merely the first qualifying initialization
+observed in the seven-day window. The historical lower boundary is Solana
+genesis slot `0`, inclusive. A pre-window qualifying initialization excludes
+the mint; a later pool is a duplicate and cannot make the mint newly active.
+The census must complete the full prior-history search before the denominator
+is valid. Missing archive history, an unexplained pagination gap, a null
+required primitive, or an unavailable prior-history check sets
+`NEWLY_ACTIVE_HISTORY_COMPLETE = NO`, `PACKET_VALID = NO`, and
+`SOURCE_STACK_QUALIFIED = NO`; absence is never treated as “no prior pool.”
+
+### Raydium initialization-time state
+
+`INITIALIZE_OPEN_TIME_ARGUMENT` is the u64 argument decoded after the frozen
+instruction discriminator. It is distinct from
+`INITIALIZED_POOL_STATE_OPEN_TIME`, the field stored by Raydium. Current
+Raydium CPMM source mutates a local `open_time` before storing it: when the
+argument is less than or equal to the program’s `Clock::get().unix_timestamp`,
+the stored value becomes that runtime timestamp plus one; otherwise it remains
+the argument. `INITIALIZATION_CLOCK_UNIX_TIMESTAMP` is therefore distinct from
+the RPC `blockTime` estimate. The V0 inclusion rule uses the argument and the
+known initialization-time zero status; it never applies the impossible stored
+`open_time <= blockTime` predicate. `LATER_CURRENT_POOL_STATE` is never read to
+decide historical eligibility, newly-active status, market legibility, or audit
+population. If required initialization-time state cannot be reconstructed
+without a later mutable read, the case is `UNAVAILABLE_OR_INVALID`, not an
+exclusion or success.
 
 Every eligible observation stores:
 
@@ -126,6 +201,12 @@ Every eligible observation stores:
 - `eligibility_knowledge_at`: the `fetched_at` of the first complete finalized
   census evidence; this is the conservative knowledge-time boundary;
 - `fetched_at` and `recorded_at` for every provider observation.
+
+`blockTime` is Solana’s estimated Unix-second block-production time and may be
+null. A null required event time is unavailable. `source_event_at`,
+`eligibility_knowledge_at`, host receipt time, provider `fetched_at`, and
+`recorded_at` have non-overlapping meanings; later corrections append evidence
+and never rewrite a sealed eligibility observation.
 
 The event timestamp is used to measure discovery latency. Any decision use of
 the observation is bounded by `eligibility_knowledge_at`, never by a later
@@ -185,6 +266,22 @@ The roles and public evidence are also recorded in the JSON contract.
   connection limits, and max pubkeys by plan; exact stream delivery behavior,
   disconnect loss window, and billing for this exact filter are
   `UNKNOWN_TO_BE_MEASURED`.
+- Stream commitment: `finalized`, chosen because the observation claim is
+  about finalized canonical pool initialization events and must not include
+  processed fork/revert ambiguity. This value cannot change mid-run.
+- Receipt clock: at first message callback entry, record
+  `host_received_at_utc` from the host wall clock and
+  `host_received_monotonic_ns` from a monotonic clock, plus the sampled
+  wall-minus-monotonic offset. Recalibrate at start and end; a changed offset
+  or backward wall-clock step makes the latency result `INVALID`.
+- First observation and replay: key the first observation by
+  `(chain_id, signature, initialization instruction path, pool, mint)`.
+  `LIVE_FIRST_OBSERVATION` is a first event on the continuously connected
+  finalized stream; `REPLAY_RECOVERY` is delivered through `fromSlot` or
+  automatic reconnect replay; `DUPLICATE` is a later observation of an already
+  seen identity; `LATE` is first observed after the ten-minute boundary or
+  census close. Replay/recovery never resets latency or enters the successful
+  low-latency numerator.
 - Pagination/order/timestamps: reconnect and historical replay are documented;
   the stream’s raw slot/transaction ordering, replay overlap behavior, and
   provider timestamp semantics are `UNKNOWN_TO_BE_MEASURED`. Smokestack will
@@ -200,36 +297,42 @@ The roles and public evidence are also recorded in the JSON contract.
   sublicensing, and interference. Later use must be account-authorized and raw
   evidence retention must be checked against the applicable plan/terms.
 
-### `BIRDEYE_SOLANA_MARKET_DATA_V3`
+### `SOLANA_CHAIN_NATIVE_CPMM_INITIALIZATION_STATE_V0`
 
 - Role: `MARKET_STATE`.
-- Exact family: Birdeye Data API Solana token/market endpoints, using Token -
-  All Market List (`/defi/v2/markets`) to resolve pools and Token - Market Data
-  (`/defi/v3/token/market-data`) or its documented single-token equivalent for
-  the frozen mint at the eligibility knowledge-time boundary.
-- Public evidence: Birdeye Token/Market List, getting-started,
-  compute-unit-cost, and per-API-rate-limit documentation.
-- Authentication: `X-API-KEY`; a later source-specific credential is required.
-- Free/paid status and pricing: an account/API key and package are required;
-  public docs list 30 compute units for all-market-list and 10 compute units
-  for token market data, but the applicable package price is
-  `UNKNOWN_TO_BE_MEASURED`. No free or paid spend is authorized here.
-- Rate-limit semantics: public docs list 100 requests/minute for all-market
-  list and 300 requests/minute for token market data. Account/package limits
-  and burst behavior remain `UNKNOWN_TO_BE_MEASURED`.
-- Pagination/order/timestamps: the list family documents discovery and pool
-  lists; exact cursor, ordering, snapshot timestamp, correction, and historical
-  as-of semantics for this use are `UNKNOWN_TO_BE_MEASURED`.
-- Schema/version: endpoint payload schema and version header must be captured;
-  exact version pin is `UNKNOWN_TO_BE_MEASURED`.
-- Historical/live claim: market, liquidity, price, and transaction-flow data
-  are publicly described; historical point-in-time completeness is unmeasured.
-- Known limitations: an aggregate market layer may omit or reinterpret pools;
-  provider labels cannot establish market legibility, and missing records are
-  unavailable rather than excluded.
-- Terms/licensing: Birdeye’s published terms govern API data access and use;
-  later retention, attribution, redistribution, and research-use constraints
-  must be confirmed against the selected package before execution.
+- Exact family: raw finalized Solana JSON-RPC transaction/block evidence plus
+  the pinned Raydium CPMM initialization semantics.
+- Public evidence: Solana `getSignaturesForAddress`, `getBlock`,
+  `getTransaction`, and `getBlockTime`; Raydium CPMM instructions and the
+  pinned public source revision; QuickNode method documentation.
+- Authentication: a separately controlled QuickNode endpoint/API key is
+  required later. This candidate shares the QuickNode backend with
+  `DIRECT_CHAIN_AUDIT` and is not represented as independent.
+- Free/paid status and pricing: public QuickNode free trial and paid plans;
+  no spend is authorized. Actual market-state call count and cost are
+  `UNKNOWN_TO_BE_MEASURED`.
+- Rate-limit semantics: plan RPS and method/archive limits are documented at
+  plan level; exact market-state availability is `UNKNOWN_TO_BE_MEASURED`.
+- Pagination/order/timestamps: no provider market pagination. The closed
+  census ledger supplies finalized slot, full block transaction-array index,
+  and instruction path. Eligibility uses initialization `blockTime` and the
+  decoded `INITIALIZE_OPEN_TIME_ARGUMENT`; `blockTime` is estimated and may be
+  null. `fetched_at` is knowledge time, not event time.
+- Non-circular coverage: each `MARKET_STATE` case requires its own raw
+  request/response evidence and hash at the eligibility boundary. The census
+  row is not reused as automatic coverage success; a missing RPC primitive
+  remains unavailable even when census traversal completed.
+- Schema/version: standard Solana JSON-RPC plus the pinned Raydium decoder;
+  any missing historical initialization primitive is
+  `UNAVAILABLE_OR_INVALID`.
+- Historical/live claim: raw chain-native initialization evidence is
+  documented; archive completeness and per-asset availability remain
+  `UNKNOWN_TO_BE_MEASURED`.
+- Known limitations: the candidate shares a QuickNode backend with the audit,
+  blockTime can be null/estimated, later mutable `PoolState` is prohibited,
+  and archive/pruning/rate limits fail closed.
+- Terms/licensing: QuickNode API-credit/plan terms and permitted evidence
+  retention must be confirmed before execution.
 
 ### `HELIUS_ENHANCED_TRANSACTIONS_V1`
 
@@ -429,8 +532,8 @@ deduplicated.
 |---|---|---|
 | Successful parse rate | Scheduled logical cases whose final adjudication has a complete valid expected schema and mandatory fields | All scheduled logical cases for that role, including timeout, unavailable, malformed, and failed cases. Retry success can make the case parse-success, but any malformed payload remains schema evidence. |
 | Schema violations | Logical cases with at least one received non-duplicate payload that violates the frozen schema or mandatory-field contract | All scheduled logical cases for that role. Timeout with no payload is not a schema violation but remains a parse failure. |
-| Market-legible coverage | Distinct frozen-universe assets with a valid Birdeye market-state observation bound to the correct mint/pool and eligibility knowledge-time boundary | Every asset in the independent universe snapshot. Missing, unavailable, late, malformed, timeout, unsupported, and provider-failure cases remain in the denominator. |
-| p95 discovery latency | Each asset has `discovery_fetched_at - source_event_at` in seconds | Every asset in the frozen universe. Missing/timeout/unavailable/late beyond the 10-minute bound is assigned `+Infinity`; sort N values and use index `ceil(0.95*N)-1`. |
+| Market-legible coverage | Distinct frozen-universe assets with a valid chain-native initialization-time market-state observation bound to the correct mint/pool and eligibility knowledge-time boundary | Every asset in the independent universe snapshot. Missing, unavailable, late, malformed, timeout, unsupported, and provider-failure cases remain in the denominator. Missing census evidence cannot remove a case. |
+| p95 discovery latency | Each asset has a finite event-to-host-receipt value from a `LIVE_FIRST_OBSERVATION` with a valid receipt clock and non-null `blockTime` | Every asset in the frozen universe. `REPLAY_RECOVERY`, `DUPLICATE`, missing/timeout/unavailable/late, and invalid-clock cases remain visible and are `+Infinity`/not reportable; sort N values and use index `ceil(0.95*N)-1`. |
 | First-buyer availability | Eligible assets with one unambiguous Helius first-buyer answer satisfying the frozen semantics | Every audit-eligible asset. Failed, routed, ambiguous, malformed, timeout, unavailable, and provider-failure states count in the denominator and not the numerator. |
 | Audited identity/order agreement | Selected cases where Helius identity and order key exactly match independent QuickNode-derived chain truth | Every committed selected case. Any unavailable, invalid, malformed, failed, ambiguous, provider-failure, chain-failure, or disagreement state is not agreement success. |
 | Undocumented semantic shifts | No numerator; gate is zero undocumented shifts | All source observations and provider/schema changes during the packet. A documented, captured, versioned change may be recorded; an undocumented or silently interpreted change fails the gate. |
@@ -439,6 +542,35 @@ Late results never reopen or shrink a denominator. A correction appends a new
 observation linked to the original case; it does not erase the original state
 or change the frozen snapshot.
 
+Every Stage-1 metric has only these result states: `PASS`, `FAIL`,
+`NOT_REPORTABLE_INVALID_PACKET`, or `NOT_REPORTABLE_EMPTY_DENOMINATOR`. A gate
+may be `PASS` or `FAIL` only when `PACKET_VALID = YES` and
+`CENSUS_COMPLETE = YES`. If census completeness is not proven, coverage,
+availability, audit, and all other Stage-1 results are
+`NOT_REPORTABLE_INVALID_PACKET`; the denominator is never shrunk.
+
+If the closed universe denominator is zero, `EMPTY_UNIVERSE = YES`,
+`PACKET_VALID_FOR_STAGE1_PASS = NO`, and `SOURCE_STACK_QUALIFIED = NO`. Each
+metric whose denominator is zero is explicitly
+`NOT_REPORTABLE_EMPTY_DENOMINATOR`. In particular, discovery p95 is
+`NOT_REPORTABLE` with no eligible latency observations; if audit population
+`N = 0`, `AUDIT_SAMPLE_SIZE = 0` and `AUDIT_AGREEMENT = NOT_REPORTABLE`. For
+`0 < N < 200`, the frozen sample size is `min(200, N)` without replacement,
+and every selected case remains visible under its frozen failure/unavailable
+treatment. No uncertainty criterion is added.
+
+### Temporal invariants
+
+No later mutable state may affect universe eligibility, newly-active
+classification, market legibility at eligibility, discovery latency,
+first-buyer classification, or audit population. `source_event_at` is the
+chain event primitive; `eligibility_knowledge_at` is the first complete
+finalized census knowledge boundary; `host_received_at_utc` is the local
+receipt clock; `fetched_at` is provider observation/knowledge time; and
+`recorded_at` is ledger persistence time. A later correction may append
+evidence, but cannot rewrite the sealed observation or make a current snapshot
+historical.
+
 ## I. Future execution shape (specified, not executed)
 
 - Observation window: one seven-day UTC window as defined above; close is fixed
@@ -446,25 +578,30 @@ or change the frozen snapshot.
   is reached, preserve all known cases and close as invalid/not qualified;
   never sample down the universe.
 - Evaluation order: (1) QuickNode chain census and snapshot commitment;
-  (2) Helius LaserStream discovery capture; (3) Birdeye market-state requests;
-  (4) Helius Enhanced Transactions first-buyer claims; (5) QuickNode audit of
-  the committed sample; (6) gate calculation and semantic-drift review.
+  (2) Helius LaserStream discovery capture; (3) chain-native market-state
+  adjudication from initialization-time evidence; (4) Helius Enhanced
+  Transactions first-buyer claims; (5) QuickNode audit of the committed
+  sample; (6) gate calculation and semantic-drift review.
 - Request ceilings: one LaserStream connection, at most 10 reconnects and one
   15-minute replay per reconnect; at most 20 Helius history pages per asset;
-  at most two Birdeye market requests per asset; at most 50,000 QuickNode
-  signature pages and 100,000 raw RPC calls total. Exceeding a ceiling is an
-  explicit capacity failure, not a denominator adjustment.
+  at most 8 raw RPC calls per chain-native market-state case; at most 50,000
+  QuickNode signature pages and 100,000 raw RPC calls total. Exceeding a
+  ceiling before exhaustive census proof is `CENSUS_COMPLETE = NO`,
+  `PACKET_VALID = NO`, and `NOT_REPORTABLE_INVALID_PACKET`, not a denominator
+  adjustment.
 - Retries: two retries maximum for 408/429/5xx/transport failures with
   bounded exponential backoff; no retry for 400/401/403/404 or schema errors.
   All attempts, including unsuccessful and duplicate attempts, are retained.
-- Concurrency: one stream; four concurrent Birdeye requests; four concurrent
-  Helius history requests; eight concurrent QuickNode reads. Request ordering
-  within a logical case is deterministic.
+- Concurrency: one stream; four concurrent Helius history requests; eight
+  concurrent QuickNode reads. Request ordering within a logical case is
+  deterministic.
 - Timeouts: 30 seconds for a stream operation/replay and 10 seconds per HTTP
   request; timeout is a first-class result and not an implicit retry success.
 - Pagination: use only documented cursors/before-until tokens; no page is
   silently truncated. Helius history is capped at 20 pages per asset; the
-  QuickNode census is capped at 50,000 signature pages.
+  QuickNode census is capped at 50,000 signature pages. Census termination is
+  proven only after the empty-page/genesis condition and every required
+  transaction/block primitive is resolved.
 - Raw evidence: retain request metadata, response bytes or permitted immutable
   references, SHA-256 hashes, endpoint/product/schema identity, timestamps,
   attempt status, parser result, and cost evidence for at least 24 months. If a
@@ -476,10 +613,10 @@ or change the frozen snapshot.
   request creates a new packet and cannot repair the current packet.
 - Cost accounting: record plan, fixed subscription, credits, requests,
   retries, bytes, overages, and actual invoice/usage evidence separately for
-  every source. Public estimate is at least Helius Business `$499/month` plus
-  QuickNode Build `$49/month`, plus a Birdeye package and usage charges that
-  are not publicly fixed in the selected documentation. This is an estimate,
-  not authorization or actual spend.
+  every source, including per-census-page cursor and per-RPC method. Public
+  estimate is at least Helius Business `$499/month` plus QuickNode Build
+  `$49/month`, plus variable usage/credits. This is an estimate, not
+  authorization or actual spend.
 - Semantic drift: capture documentation URLs and retrieval timestamps before
   execution; bind response schema/version for every observation; compare
   payload shape, enum meaning, timestamp meaning, ordering, pagination, and
@@ -499,10 +636,10 @@ The end-of-phase state is exactly:
 - `SOLANA_RPC_EXECUTION_AUTHORIZED = NO`
 - `MEASUREMENT_AUTHORIZED = NO`
 
-Future execution may require Helius, Birdeye, and QuickNode credentials and
-possibly paid plans. Those credentials are listed as prerequisites only; none
-was read, copied, tested, or stored. Host execution authorization must be
-explicitly granted after this preregistration closes.
+Future execution may require Helius and QuickNode credentials and possibly
+paid plans. Those credentials are listed as prerequisites only; none was read,
+copied, tested, or stored. Host execution authorization must be explicitly
+granted after this preregistration closes.
 
 ## K. Fail-closed product state
 
@@ -525,21 +662,27 @@ or PR-02 work. `SOURCE_STACK_QUALIFIED = NO` and `PR02 = NOT_STARTED`.
 The following stable public documentation was consulted without requesting
 provider data:
 
-- Solana RPC: [getBlock](https://solana.com/docs/rpc/http/getblock),
-  [getTransaction](https://solana.com/docs/rpc/http/gettransaction), and
+- Solana RPC: [getSignaturesForAddress](https://solana.com/docs/rpc/http/getsignaturesforaddress),
+  [getBlock](https://solana.com/docs/rpc/http/getblock),
+  [getTransaction](https://solana.com/docs/rpc/http/gettransaction),
+  [getBlockTime](https://solana.com/docs/rpc/http/getblocktime), and
   [JSON structures](https://solana.com/docs/rpc/json-structures).
 - Raydium: [program addresses](https://docs.raydium.io/reference/program-addresses),
   [CPMM instructions](https://docs.raydium.io/products/cpmm/instructions), and
-  [CPMM accounts](https://docs.raydium.io/products/cpmm/accounts).
+  [CPMM accounts](https://docs.raydium.io/products/cpmm/accounts), plus the
+  pinned [CPMM source revision](https://github.com/raydium-io/raydium-cp-swap/tree/244e1241f3c8d90eb93f176dfbc35f2605ec5a5c).
 - Helius: [LaserStream gRPC](https://www.helius.dev/docs/laserstream/grpc),
   [Enhanced Transactions](https://www.helius.dev/docs/api-reference/enhanced-transactions/gettransactions),
   [rate limits](https://www.helius.dev/docs/billing/rate-limits),
   [pricing](https://www.helius.dev/pricing), and
   [terms](https://www.helius.dev/terms).
-- Birdeye: [Token/Market List](https://docs.birdeye.so/reference/tokenmarket-list),
-  [compute-unit cost](https://docs.birdeye.so/docs/compute-unit-cost),
-  [per-API rate limits](https://docs.birdeye.so/docs/per-api-rate-limit), and
-  [getting started](https://docs.birdeye.so/reference/birdeye-api-getting-started).
+- Birdeye was reviewed and removed from the executable candidate set because
+  the cited current endpoints are current snapshots without frozen
+  eligibility-time/as-of semantics. For the historical review note only,
+  Birdeye’s current rate-limit page labels `/defi/v2/markets` as `100 rps` and
+  `/defi/v3/token/market-data` as `300 rps`, not rpm:
+  [Token/Market List](https://docs.birdeye.so/reference/tokenmarket-list) and
+  [per-API rate limits](https://docs.birdeye.so/docs/per-api-rate-limit).
 - QuickNode: [getBlock](https://www.quicknode.com/docs/solana/getBlock),
   [getTransaction](https://www.quicknode.com/docs/solana/getTransaction),
   [Solana RPC](https://www.quicknode.com/chains/solana), and
