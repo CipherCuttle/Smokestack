@@ -98,10 +98,12 @@
     "timestamps": {
       "source_event_at": "non-null finalized transaction blockTime",
       "source_slot_or_block": "finalized slot plus transaction-array index",
-      "eligibility_knowledge_at": "fetched_at of first complete finalized census evidence",
-      "fetched_at": "provider observation/knowledge time, distinct from source_event_at",
+      "candidate_event_knowledge_at": "fetched_at of the first complete finalized census evidence for an event that may later qualify; it is not final membership and does not trigger MARKET_STATE",
+      "final_eligibility_confirmed_at": "the UTC knowledge timestamp recorded only after the complete census, genesis-inclusive prior-history proof, window closure, and outcome-independent membership ledger are sealed",
+      "market_state_fetched_at": "later host UTC retrieval timestamp for the independent event-addressed MARKET_STATE request; it is not source_event_at and carries no contemporaneous notification-latency claim",
+      "fetched_at": "provider observation/knowledge time, distinct from source_event_at; role-specific values are candidate_event_knowledge_at or market_state_fetched_at",
       "recorded_at": "local evidence persistence time",
-      "decision_boundary": "eligibility_knowledge_at",
+      "decision_boundary": "final_eligibility_confirmed_at for final denominator membership; candidate_event_knowledge_at is retained only as provenance",
       "rule": "later corrections append evidence and cannot rewrite a sealed timestamp or make a current snapshot historical"
     },
     "duplicates_aliases_migrations": {
@@ -154,9 +156,10 @@
       "authentication": "QuickNode endpoint/API key required later; no credential is present or read now",
       "pricing": "public QuickNode free/paid plan references; no spend is authorized and exact selected-operation credits/cost are UNKNOWN_TO_BE_MEASURED",
       "terms_constraint": "QuickNode API-credit, account-use, and permitted raw-evidence-retention terms must be confirmed before execution",
-      "temporal_semantics": "the claim is the frozen initialization-time state at the eligible event's finalized slot, not a current snapshot; requests are triggered when the minimal census row becomes eligible, with fetched_at recording knowledge time",
-      "request_trigger": "one independent market-state request sequence per eligible universe member, started within 30 seconds of eligibility_knowledge_at; later backfill is LATE and cannot become a valid contemporaneous observation",
-      "fetched_at": "host UTC knowledge timestamp captured at request/response handling; never substituted for source_event_at",
+      "temporal_semantics": "the claim is the frozen initialization-time state at the immutable eligible event's finalized slot, not a current snapshot; retrieval may occur after final census closure because the event-addressed evidence is point-in-time valid",
+      "request_trigger": "one independent market-state request sequence per final eligible universe member, issued only after FINAL_ELIGIBILITY_CONFIRMED_AT and in canonical asset order; this is historical event-state retrieval, not a contemporaneous notification-latency claim",
+      "event_time_claim": "source_event_at is the immutable initialization event time; market_state_fetched_at is the later host retrieval time and never substitutes for source_event_at",
+      "fetched_at": "host UTC knowledge timestamp captured at request/response handling; represented as market_state_fetched_at and never substituted for source_event_at",
       "exact_fields": {
         "pool_account": "PoolState account bound by the initialization instruction",
         "candidate_mint": "canonical non-quote mint and its frozen token-program identity",
@@ -207,21 +210,47 @@
     "observation_binding": "for each LIVE_FIRST_OBSERVATION at callback entry capture wall_received_utc and mono_received_ns synchronously, without await; retain the raw pair and sampled offset",
     "predicted_wall_received_utc": "wall_start_utc + (mono_received_ns - mono_start_ns)",
     "clock_skew_tolerance": {"value": 0.25, "unit": "seconds", "justification": "250 ms is below 0.21% of the 120-second latency gate and bounds receipt-clock error at a sub-second scale relevant to provider freshness"},
+    "absolute_utc_preflight": {
+      "frozen": true,
+      "utc_time_source_identity": "HOST_TRUSTED_TIME_SYNCHRONIZATION_SERVICE_CHRONY",
+      "utc_sync_measurement_method": "Before qualification and at the frozen health-check cadence, read the active chrony tracking state and validated synchronized-source state. Record the signed local-wall-minus-trusted-UTC offset estimate and a conservative upper error bound that includes the synchronization service uncertainty, root dispersion, and half root delay; a normal/leap-valid synchronized state is required. This is a semantic contract, not a time request performed during preregistration.",
+      "absolute_utc_offset_estimate": "signed seconds: local host wall UTC estimate minus trusted UTC estimate at UTC_SYNC_OBSERVED_AT",
+      "absolute_utc_error_bound": "non-negative seconds: conservative upper bound on the absolute UTC error of the local wall clock at UTC_SYNC_OBSERVED_AT, including measurement uncertainty and synchronization dispersion/delay",
+      "utc_sync_observed_at": "host wall UTC timestamp captured with the synchronization measurement and paired with a monotonic sample",
+      "utc_sync_max_age": {"value": 60, "unit": "seconds", "rule": "no receipt observation or checkpoint is valid unless the latest PASS measurement is at most 60 seconds old by monotonic time; a missed or stale health check fails closed"},
+      "max_absolute_utc_error": {"value": 0.25, "unit": "seconds", "rule": "at qualification start and every health check, abs(absolute_utc_offset_estimate) + absolute_utc_error_bound <= 0.25 seconds"},
+      "start_and_continuation": "CLOCK_PREFLIGHT is PASS only when the start measurement passes and every 60-second maximum-age health check through finalization passes; no local wall-clock fallback is permitted",
+      "failure_behavior": "if trusted UTC state cannot be established, CLOCK_PREFLIGHT=FAIL, LATENCY_PACKET_VALID=NO, DISCOVERY_LATENCY_GATE=NOT_REPORTABLE_INVALID_CLOCK, and SOURCE_STACK_QUALIFIED=NO"
+    },
     "validity_rules": [
       "mono_received_ns >= mono_start_ns",
       "abs(wall_received_utc - predicted_wall_received_utc) <= 0.25 seconds",
       "source_event_at is non-null and discovery_latency_seconds = wall_received_utc - source_event_at is finite and >= 0",
       "negative latency is INVALID_CLOCK and is never clamped or counted",
-      "a wall/monotonic offset discontinuity above 0.25 seconds makes the affected interval INVALID_CLOCK"
+      "a wall/monotonic offset discontinuity above 0.25 seconds makes the sequence-defined affected interval INVALID_CLOCK",
+      "a receipt observation is eligible for FINITE latency only when CLOCK_PREFLIGHT=PASS, its local wall/monotonic checks pass, and its sequence is not in any invalid checkpoint interval"
     ],
     "checkpoints": {
       "cadence": "every 100 milliseconds by monotonic schedule",
       "required_pairs": ["start", "each cadence checkpoint", "before each receipt batch when batching exists", "after each receipt batch when batching exists", "final"],
-      "interval_rule": "compare each checkpoint offset with the immediately preceding checkpoint; a change above 0.25 seconds invalidates all receipt observations in the affected interval and the interval is retained",
-      "transient_step_rule": "a step that is visible in any checkpoint or observation pair is invalid; start/end-only comparison is never sufficient; a wholly unobserved sub-cadence step cannot be inferred from timestamps and does not become a valid successful latency",
-      "implementation_determinism": "the validity decision is a pure function of the frozen timestamp pairs, source_event_at, tolerance, and checkpoint interval labels"
+      "sample_identity": "every checkpoint and receipt sample has monotonic_ns and a process-local clock_sample_sequence; sequence starts at 1 and increments exactly once in the synchronous capture section, with no equal sequence values",
+      "capture_order": "the start checkpoint is sequence 1; each checkpoint or receipt sample obtains its sequence at capture before any later sample; receipt callback capture occurs before callback parsing or await; optional batch-boundary checkpoints are captured in the stated before/after order",
+      "first_checkpoint": "the first checkpoint has no predecessor and therefore creates no invalid interval; it establishes the initial offset",
+      "interval_rule": "for consecutive checkpoints C[i-1] and C[i], if abs(offset(C[i]) - offset(C[i-1])) > 0.25 seconds, mark exactly the sequence interval C[i-1].clock_sample_sequence < R.clock_sample_sequence <= C[i].clock_sample_sequence as INVALID_CLOCK for receipt observations R",
+      "equality_behavior": "the 0.25-second discontinuity comparison is strictly greater-than; a receipt at the lower boundary is excluded and a receipt at the upper boundary is included",
+      "final_checkpoint": "the final checkpoint is captured after the last receipt and final batch-boundary checkpoint; its comparison applies through its sequence and is not omitted",
+      "consecutive_and_overlapping_intervals": "each discontinuity creates its own closed-under-the-upper-bound sequence interval; the union of all such intervals is invalid, so consecutive or overlapping intervals remain invalid without special-case merging",
+      "transient_step_rule": "a step visible in any checkpoint comparison or a receipt's own wall/monotonic pair invalidates the mechanically specified sample; start/end-only recalibration is never sufficient, and an unobserved sub-cadence step cannot be inferred or promoted to a valid successful latency",
+      "implementation_determinism": "two faithful implementations supplied the same ordered checkpoint/receipt samples, source event times, tolerance, and UTC-health samples produce exactly the same classifications"
     },
-    "latency_population": "only LIVE_FIRST_OBSERVATION with a valid clock and non-null chain event time may enter p95; replay, duplicate, late, timeout, unavailable, malformed, unsupported, and invalid-clock cases remain visible and do not enter the success numerator"
+    "latency_datum_contract": {
+      "one_per_eligible_asset": true,
+      "finite": {"kind": "FINITE", "ordering": "all FINITE values are ordered by seconds and every FINITE value is less than FAILURE_INFINITY"},
+      "failure": {"kind": "FAILURE_INFINITY", "ordering": "greater than every FINITE value", "reasons": ["CASE_INVALID_CLOCK", "NEGATIVE_LATENCY", "NO_LIVE_OBSERVATION", "REPLAY_ONLY", "DUPLICATE_ONLY", "LATE", "TIMEOUT", "UNAVAILABLE", "MISSING_SOURCE_EVENT_AT", "MALFORMED", "UNSUPPORTED", "PACKET_CLOCK_PREFLIGHT_INVALID"]},
+      "packet_wide_failure": "PACKET_CLOCK_PREFLIGHT_INVALID assigns FAILURE_INFINITY to each eligible case for visibility but makes the packet LATENCY_PACKET_VALID=NO and DISCOVERY_LATENCY_GATE=NOT_REPORTABLE_INVALID_CLOCK",
+      "p95": "N is the count of all eligible universe members, not the count of FINITE datums; for N > 0 use sorted_latency[ceil(0.95*N)-1] over all N tagged datums; N=0 is NOT_REPORTABLE"
+    },
+    "latency_population": "every eligible universe member receives exactly one latency datum: {kind: FINITE, seconds: non-negative finite} only for a LIVE_FIRST_OBSERVATION with valid absolute UTC preflight, valid local receipt clock, and non-null finite source_event_at; otherwise {kind: FAILURE_INFINITY, reason: frozen failure classification}. Every FINITE value orders below FAILURE_INFINITY. Replay, duplicate, late, timeout, unavailable, malformed, unsupported, invalid-clock, and clock-preflight failures are never omitted"
   },
   "first_buyer_semantics": {
     "frozen": true,
@@ -245,11 +274,14 @@
     "forbidden_filters": ["provider success/failure", "parse result", "first-buyer answer", "chain agreement", "price", "volume", "survival", "attention"]
   },
   "audit_sampling": {
-    "snapshot": "full universe ledger at window end + 30 minutes, canonical bytes and SHA-256 committed before first-buyer or audit result inspection",
+    "snapshot": "full universe ledger at window end + 30 minutes; include exactly the ordered array of complete outcome-independent asset objects with fields chain_id, mint_address, pool_address, initialization_signature, initialization_slot, block_transaction_index, candidate_vault, quote_vault, and source_event_at; serialize its UTF-8 JSON bytes with RFC8785/JSON Canonicalization Scheme (JCS) and commit SHA-256 before first-buyer or audit result inspection",
+    "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
+    "snapshot_field_contract": {"fields": ["chain_id", "mint_address", "pool_address", "initialization_signature", "initialization_slot", "block_transaction_index", "candidate_vault", "quote_vault", "source_event_at"], "array_order": "canonical asset identity order by (chain_id, mint_address), ascending bytewise UTF-8 order", "object_member_order": "RFC8785/JCS member ordering; application insertion order is not used", "encoding": "UTF-8", "digest": "SHA-256 of the RFC8785/JCS UTF-8 bytes"},
     "sample_size": "min(200,N)",
     "replacement": "without replacement; no discretionary replacement",
     "seed": "smokestack:pr01:source-qualification:audit-v1",
-    "selector": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity), unsigned hexadecimal byte sort, first min(200,N)",
+    "selector": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity), with concatenation encoded as UTF-8, interpreted as unsigned hexadecimal bytes and sorted ascending; select the first min(200,N) without replacement",
+    "selected_list_commitment": "SHA-256 of the RFC8785/JCS UTF-8 bytes of the ordered selected canonical identity list",
     "unavailable_selected_case": "retained in sample and denominator"
   },
   "denominators": {
@@ -263,7 +295,7 @@
     },
     "parse": {"numerator": "complete valid expected schema and mandatory fields", "denominator": "all scheduled logical cases for the role", "failure": "invalid, malformed, timeout, unavailable, late, and unsupported fail parse; retries do not change denominator"},
     "schema": {"numerator": "logical case with a non-duplicate payload violating frozen schema/mandatory fields", "denominator": "all scheduled logical cases for the role", "failure": "timeout without payload is parse failure but not schema violation; duplicate conflict is schema evidence"},
-    "discovery_latency": {"numerator": "finite non-negative event-to-host-receipt seconds from LIVE_FIRST_OBSERVATION with valid receipt clock", "denominator": "every frozen-universe asset", "failure": "invalid-clock, replay, duplicate, late, missing, timeout, unavailable, or null blockTime remains visible and is not a successful latency observation; p95 index is ceil(0.95*N)-1"},
+    "discovery_latency": {"datum": "exactly one tagged datum per eligible universe member: {kind: FINITE, seconds: non-negative finite} or {kind: FAILURE_INFINITY, reason: frozen failure classification}; every FINITE value orders below FAILURE_INFINITY", "numerator": "count of FINITE datums, for descriptive reporting only", "denominator": "N = count(all eligible universe members in the closed complete census)", "failure": "invalid-clock, replay, duplicate, late, missing source_event_at, timeout, unavailable, malformed, unsupported, and clock-preflight failure become FAILURE_INFINITY; packet-wide absolute-clock failure is NOT_REPORTABLE_INVALID_CLOCK, never omission", "p95": "if N > 0, sort all N tagged datums by total order and use sorted_latency[ceil(0.95*N)-1]; if N = 0, NOT_REPORTABLE and cannot pass; failures cannot improve the order statistic"},
     "first_buyer_availability": {"numerator": "unambiguous first-buyer answer satisfying frozen semantics", "denominator": "every audit-eligible asset", "failure": "all unavailable, malformed, ambiguous, provider-failure, and chain-audit-failure states remain denominator"},
     "audit_agreement": {"numerator": "selected Helius identity and order exactly match QuickNode-derived chain truth", "denominator": "every committed selected case", "failure": "unavailable, malformed, ambiguous, provider-failure, chain-audit-failure, and disagreement are not success; no replacement"},
     "zero_population": "all zero denominators are NOT_REPORTABLE and cannot pass"
@@ -277,9 +309,20 @@
     "shared_backend_rule": "census, market-state, and direct audit may share QuickNode infrastructure; this is disclosed and no independence is claimed for market-state"
   },
   "execution_shape": {
-    "evaluation_order": ["complete_chain_census_snapshot", "live_discovery_and_receipt_clock", "per-asset_market_state_request", "first_buyer", "direct_chain_audit_sample", "gate_calculation"],
+    "evaluation_order": ["live_discovery_and_receipt_clock_capture_during_window", "complete_chain_census_snapshot_and_final_eligibility_closure", "per-asset_market_state_request_after_final_eligibility_in_canonical_identity_order", "first_buyer", "direct_chain_audit_sample", "gate_calculation"],
     "request_ceilings": {"laserstream_connections": 1, "laserstream_reconnects": 10, "laserstream_replay_minutes_per_reconnect": 15, "helius_history_pages_per_asset": 20, "market_state_raw_rpc_calls_per_asset": 8, "quicknode_signature_pages": 50000, "quicknode_raw_rpc_calls_total": 100000},
-    "market_state_trigger_ceiling": "one scheduled sequence per eligible asset; at most eight raw RPC calls, two retries per retryable call, and 30 seconds from eligibility_knowledge_at to first request",
+    "quicknode_role_budgets": {
+      "accounting_unit": "every QuickNode JSON-RPC request attempt, including retries, consumes one charged raw RPC call; no role may borrow or transfer unused calls",
+      "QUICKNODE_CENSUS_CALL_BUDGET": 50000,
+      "QUICKNODE_MARKET_STATE_CALL_BUDGET": 40000,
+      "QUICKNODE_AUDIT_CALL_BUDGET": 10000,
+      "QUICKNODE_GLOBAL_CALL_CEILING": 100000,
+      "census": {"ceiling": 50000, "order": "newest-to-oldest signature-page cursor order, then required block/transaction resolution order", "retry_charging": "initial request and each retry are charged", "exhaustion": "before termination/completeness proof: CENSUS_COMPLETE=NO, PACKET_VALID=NO, SOURCE_STACK_QUALIFIED=NO; never shrink the census"},
+      "market_state": {"ceiling": 40000, "order": "final eligible universe members sorted by (chain_id, mint_address) ascending bytewise UTF-8 order", "max_request_calls_per_asset": 8, "max_charged_attempts_per_asset": 24, "retry_charging": "each initial request and up to two retry attempts is charged; the 24-call worst case is reserved before execution", "preflight_fit": "after final eligibility closure, require N * 24 <= 40000 before issuing any selective MARKET_STATE request; otherwise PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO before execution", "exhaustion": "any unexpected exhaustion or incomplete all-member execution yields PACKET_VALID=NO; no sampling, borrowing, or denominator shrinkage"},
+      "audit": {"ceiling": 10000, "order": "the already committed selected-list order, then each case's frozen chain-order request sequence", "max_charged_attempts_per_case": 50, "retry_charging": "each initial request and retry attempt is charged", "preflight_fit": "require sample_size * 50 <= 10000 before executing the committed sample; otherwise PACKET_VALID=NO without changing the sample", "exhaustion": "any exhaustion before every committed selected case is adjudicated yields PACKET_VALID=NO; no replacement or sample shrinkage"},
+      "global_ceiling": "100000 = 50000 + 40000 + 10000"
+    },
+    "market_state_trigger_ceiling": "one independent sequence per final eligible asset, issued only after FINAL_ELIGIBILITY_CONFIRMED_AT in canonical identity order; at most eight request calls and at most 24 charged attempts including two retries per retryable request; no 30-second contemporaneous trigger applies",
     "retry_count": 2,
     "retryable": ["408", "429", "5xx", "transport"],
     "non_retryable": ["400", "401", "403", "404", "schema_error"],
@@ -289,6 +332,34 @@
     "parser_identity": "later harness commit, Node/npm, contract digest, schema revisions, and parser version bound before first request; post-request change creates a new packet",
     "cost_accounting": "record plan, fixed fee, credits, requests, retries, bytes, overages, and invoice/usage evidence per source",
     "failure_preservation": "never delete, hide, or denominator-edit failed, late, duplicate, unavailable, invalid, or selected cases"
+  },
+  "closure_assertions": {
+    "H01_ABSOLUTE_UTC_PREFLIGHT_FROZEN": "PASS",
+    "H01_STALE_UTC_SYNC_FAIL_CLOSED": "PASS",
+    "H02_ONE_LATENCY_DATUM_PER_ELIGIBLE_ASSET": "PASS",
+    "H02_P95_DENOMINATOR_EQUALS_ELIGIBLE_UNIVERSE": "PASS",
+    "H02_FAILURES_CANNOT_IMPROVE_P95": "PASS",
+    "H03_CLOCK_INTERVAL_BOUNDARIES_FROZEN": "PASS",
+    "H03_CLOCK_CLASSIFICATION_DETERMINISTIC": "PASS",
+    "H04_MARKET_STATE_TRIGGER_EVENT_FROZEN": "PASS",
+    "H04_MARKET_STATE_EXECUTION_ORDER_UNIQUE": "PASS",
+    "H04_MARKET_STATE_TEMPORAL_FEASIBILITY": "PASS",
+    "H05_ROLE_SPECIFIC_QUICKNODE_BUDGETS": "PASS",
+    "H05_SCHEDULER_ORDER_CANNOT_SELECT_CASES": "PASS",
+    "H05_RESOURCE_EXHAUSTION_FAIL_CLOSED": "PASS",
+    "H06_RFC8785_JCS_RESTORED": "PASS",
+    "H06_UNIVERSE_DIGEST_REPRODUCIBLE": "PASS",
+    "H06_AUDIT_SAMPLE_REPRODUCIBLE": "PASS",
+    "CARRIED_FORWARD_VALIDATED_SEMANTICS": "PASS",
+    "ZERO_DENOMINATOR_FAIL_CLOSED": "PASS",
+    "STAGE1_GATE_IDENTITY": "PASS",
+    "EXECUTION_RESOURCE_CLOSURE": "PASS",
+    "MARKET_STATE_NON_TAUTOLOGICAL": "PASS",
+    "MARKET_STATE_SUBSTANTIVE_OBSERVATION": "PASS",
+    "AUTHORIZATION_FAIL_CLOSED": "PASS",
+    "MEASUREMENT_AUTHORIZED": "NO",
+    "SOURCE_STACK_QUALIFIED": "NO",
+    "PR02_STARTED": "NO"
   },
   "authorization": {
     "measurement_authorized": false,

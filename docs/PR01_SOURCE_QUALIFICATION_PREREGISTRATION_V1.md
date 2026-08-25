@@ -12,7 +12,7 @@
 - `LIVE_PROVIDER_EXECUTION_AUTHORIZED = NO`
 - `PR02 = NOT_STARTED`
 - Exact JSON: [`experiments/qualification/pr01-source-qualification-prereg-v1.json`](../experiments/qualification/pr01-source-qualification-prereg-v1.json)
-- JSON SHA-256: `93df6beb85528b77804218e3b56f8751b567d7460a0c42500f2c351b73aa81e5`
+- JSON SHA-256: `73e8b8f38b7c20041ddb616f23d9ca0f4f35528e341810ad127dcad96b9fe0ff`
 
 This is a new immutable preregistration. V0 remains terminally failed and is
 not edited, reopened, repaired, or re-reviewed. V1 carries forward the V0
@@ -83,13 +83,24 @@ semantics. No credentials, provider calls, or spend are authorized.
 `MARKET_STATE_CANDIDATE = QUICKNODE_SOLANA_MAINNET_RPC_MARKET_STATE_V1`.
 
 This is Option B: a separately scheduled chain observation operation, not a
-rename of census evidence. For each eligible member, the harness issues its
-own bounded raw finalized JSON-RPC request sequence (`getTransaction`/
-`getBlock` plus the required event evidence), within 30 seconds of
-`eligibility_knowledge_at`. The census response is never reused or counted as
-market-state success. The operation may share QuickNode infrastructure with
-the census and direct audit; that shared backend is disclosed and no source
-independence claim is made for MARKET_STATE.
+rename of census evidence. The contract distinguishes
+`CANDIDATE_EVENT_KNOWLEDGE_AT` (first complete evidence for an event that may
+later qualify) from `FINAL_ELIGIBILITY_CONFIRMED_AT` (the sealed result after
+the complete census, genesis-inclusive history proof, window closure, and
+outcome-independent membership ledger).
+
+After `FINAL_ELIGIBILITY_CONFIRMED_AT`, the harness issues one independent
+bounded raw finalized JSON-RPC request sequence (`getTransaction`/`getBlock`
+plus the required event evidence) for every final eligible member in ascending
+`(chain_id, mint_address)` order. The census response is never reused or
+counted as market-state success. Because the request is addressed to immutable
+finalized initialization evidence, later retrieval remains point-in-time valid:
+`source_event_at` is the initialization event time and
+`market_state_fetched_at` is the later retrieval time. This operation claims
+ability to retrieve and represent frozen event-time state, not contemporaneous
+30-second notification latency. The operation may share QuickNode
+infrastructure with the census and direct audit; that shared backend is
+disclosed and no source independence claim is made for MARKET_STATE.
 
 `AVAILABLE` requires all of these exact initialization-time fields:
 
@@ -140,7 +151,7 @@ defined valid representation; missing, malformed, unsupported, or unavailable
 values classify the operation as a failure state rather than removing its
 asset.
 
-## 4. V1-H04 receipt-clock validity contract
+## 4. Absolute UTC and local receipt-clock validity contract
 
 `RECEIPT_CLOCK_VALIDITY_FROZEN = YES` and the machine-readable contract ID is
 `V1_RECEIPT_CLOCK_V1`.
@@ -148,6 +159,44 @@ asset.
 The contract distinguishes the four domains
 `CHAIN_EVENT_TIME`, `HOST_WALL_RECEIPT_UTC`, `HOST_MONOTONIC_RECEIPT`, and
 `WALL_MONOTONIC_OFFSET`.
+
+### H-01 absolute UTC preflight
+
+Before the qualification run, and throughout it, the host must establish
+trusted absolute UTC health. The frozen implementation-independent contract is:
+
+- `UTC_TIME_SOURCE_IDENTITY = HOST_TRUSTED_TIME_SYNCHRONIZATION_SERVICE_CHRONY`;
+- `UTC_SYNC_MEASUREMENT_METHOD` reads the active chrony tracking state and
+  validated synchronized-source state, recording the signed local-wall-minus-
+  trusted-UTC offset and a conservative error bound including synchronization
+  uncertainty, root dispersion, and half root delay;
+- `ABSOLUTE_UTC_OFFSET_ESTIMATE` is that signed offset in seconds;
+- `ABSOLUTE_UTC_ERROR_BOUND` is the non-negative conservative upper error bound
+  in seconds; and
+- `UTC_SYNC_OBSERVED_AT` is the host UTC timestamp captured with the measurement
+  and its monotonic sample.
+
+The concrete bound is `MAX_ABSOLUTE_UTC_ERROR = 0.25 seconds`. At start and at
+every continuing health check, the required conservative test is:
+
+```text
+abs(ABSOLUTE_UTC_OFFSET_ESTIMATE) + ABSOLUTE_UTC_ERROR_BOUND <= 0.25 seconds
+```
+
+The maximum sync age is 60 seconds by monotonic time, with a 60-second health
+check cadence. A missing, stale, unsynchronized, leap-invalid, or over-bound
+measurement fails closed; local wall time is never used as a fallback. This
+absolute UTC contract is separate from the local wall-vs-monotonic
+discontinuity contract below.
+
+If trusted UTC state cannot be established:
+
+```text
+CLOCK_PREFLIGHT = FAIL
+LATENCY_PACKET_VALID = NO
+DISCOVERY_LATENCY_GATE = NOT_REPORTABLE_INVALID_CLOCK
+SOURCE_STACK_QUALIFIED = NO
+```
 
 At qualification start, synchronously bind `wall_start_utc` and
 `mono_start_ns`. At each live first-observation callback entry, without an
@@ -173,21 +222,57 @@ never counts as valid successful latency.
 
 Integrity checkpoints are captured at process start, every 100 ms on a
 monotonic schedule, before and after each receipt batch where batching exists,
-and at finalization. Each checkpoint compares its wall-minus-monotonic offset
-with the preceding checkpoint. A change above 250 ms invalidates the affected
-interval and all receipt observations in that interval. A discontinuity seen
-in an observation pair also invalidates that observation/interval. Start/end
-only recalibration is forbidden. A wholly unobserved sub-cadence step cannot
-be inferred from timestamps and cannot be promoted to a valid successful
-latency. The decision is a pure function of the frozen timestamp pairs,
-source event time, tolerance, and checkpoint labels, so faithful
-implementations agree.
+and at finalization. Every checkpoint and receipt sample has `monotonic_ns` and
+a process-local strictly increasing `clock_sample_sequence`; sequence 1 is the
+start checkpoint, and the sequence is assigned synchronously before any later
+sample. Receipt capture occurs at callback entry, before parsing, awaiting, or
+blocking. The first checkpoint has no predecessor and creates no invalid
+interval.
 
-Only `LIVE_FIRST_OBSERVATION` with a valid clock and non-null chain event time
-enters p95. Replay/recovery, duplicates, late, timeout, unavailable,
-malformed, unsupported, and invalid-clock cases remain visible and do not
-enter the success numerator. V0 replay/recovery behavior is otherwise
-unchanged.
+For consecutive checkpoints `C[i-1]` and `C[i]`, if
+
+```text
+abs(offset(C[i]) - offset(C[i-1])) > 0.25 seconds
+```
+
+then exactly these receipt observations are `INVALID_CLOCK`:
+
+```text
+C[i-1].clock_sample_sequence < R.clock_sample_sequence
+  <= C[i].clock_sample_sequence
+```
+
+The comparison is strictly greater-than: equality at 250 ms does not trigger
+an interval, the lower sequence boundary is excluded, and the upper boundary
+is included. The final checkpoint is captured after the last receipt and
+applies through its sequence. Each discontinuity interval is retained; the
+union handles consecutive or overlapping intervals. A receipt's own
+wall/monotonic divergence check independently invalidates that receipt. There
+is no start/end-only recalibration, and an unobserved sub-cadence step cannot
+be promoted to a valid latency. Given the same ordered samples, source event
+times, tolerance, and UTC-health samples, faithful implementations produce the
+same classifications.
+
+Every eligible universe member receives exactly one discovery-latency datum:
+
+```text
+{ "kind": "FINITE", "seconds": <non-negative finite number> }
+{ "kind": "FAILURE_INFINITY", "reason": <frozen failure classification> }
+```
+
+Every `FINITE` value orders below `FAILURE_INFINITY`. Only
+`LIVE_FIRST_OBSERVATION` with passing absolute UTC preflight, valid local
+receipt-clock classification, and non-null finite `source_event_at` receives
+the first form. Replay/recovery, duplicates, late, timeout, unavailable,
+malformed, unsupported, invalid-clock, missing-event-time, and clock-preflight
+failures receive the second form and are never omitted. A packet-wide absolute
+clock failure is `NOT_REPORTABLE_INVALID_CLOCK`, not a successful p95.
+
+For `N = count(all eligible universe members)`, the p95 order statistic sorts
+all `N` tagged datums—not only finite successes—and uses
+`sorted_latency[ceil(0.95*N)-1]`. `N = 0` is `NOT_REPORTABLE` and cannot pass.
+Because `FAILURE_INFINITY` is worse than every finite value, failures cannot
+improve p95.
 
 ## 5. Carried-forward first-buyer and audit contract
 
@@ -201,19 +286,59 @@ frozen signature-byte duplicate tie-breaker; ambiguous order is never guessed.
 
 The audit population is every distinct canonical asset in the closed complete
 universe snapshot under outcome-independent criteria. Provider absence cannot
-remove a case. The committed audit sample is selected before result inspection
-using the V1 seed and `min(200,N)` without replacement. Every selected case,
-including failures, remains in the audit denominator. First-buyer availability
+remove a case. The snapshot contains exactly the ordered complete asset
+objects with fields `chain_id`, `mint_address`, `pool_address`,
+`initialization_signature`, `initialization_slot`,
+`block_transaction_index`, `candidate_vault`, `quote_vault`, and
+`source_event_at`, ordered by `(chain_id, mint_address)` in ascending bytewise
+UTF-8 order. Its UTF-8 bytes are serialized with `RFC8785 / JSON
+Canonicalization Scheme (JCS)` and hashed with SHA-256 before result
+inspection. The V1 seed and selector are:
+
+```text
+seed = smokestack:pr01:source-qualification:audit-v1
+score = SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity)
+```
+
+Scores are sorted as unsigned hexadecimal bytes and the first `min(200,N)`
+identities are selected without replacement. The ordered selected identity list
+also receives an RFC8785/JCS UTF-8 SHA-256 commitment. Every selected case,
+including failures, remains in the audit denominator; no replacement or
+resource-order-dependent reselection is permitted. First-buyer availability
 and audited agreement thresholds remain exactly 95% and 99%.
 
 ## 6. Execution bounds and authorization
 
 Future execution has one discovery connection, ten reconnects, fifteen minutes
 of replay per reconnect, twenty Helius history pages per asset, eight
-market-state RPC calls per asset, 50,000 census signature pages, 100,000 total
-QuickNode raw RPC calls, two retries for 408/429/5xx/transport, no retry for
-400/401/403/404/schema errors, 30-second stream and 10-second HTTP timeouts,
-raw response hashing, parser identity, and source-level cost accounting.
+market-state request calls per asset, 50,000 census signature pages, and
+100,000 total QuickNode raw RPC calls. QuickNode accounting is role-specific:
+
+- census ceiling: 50,000 charged attempts, in newest-to-oldest cursor and
+  required-resolution order;
+- market-state ceiling: 40,000 charged attempts, with 24 worst-case charged
+  attempts reserved per asset (eight request calls plus two retries each), and
+  `N * 24 <= 40,000` required before any selective market-state execution; and
+- direct-audit ceiling: 10,000 charged attempts, in committed selected-list
+  order, with 50 worst-case charged attempts reserved per selected case.
+
+These are the frozen role constants:
+`QUICKNODE_CENSUS_CALL_BUDGET = 50,000`,
+`QUICKNODE_MARKET_STATE_CALL_BUDGET = 40,000`,
+`QUICKNODE_AUDIT_CALL_BUDGET = 10,000`, and
+`QUICKNODE_GLOBAL_CALL_CEILING = 100,000`.
+
+Every initial request and retry consumes one role budget unit. Roles cannot
+borrow from one another, concurrency cannot select survivors, and every role
+must complete all its frozen cases. Census exhaustion before completeness,
+market-state fit failure or exhaustion, or audit exhaustion before committed
+sample completion makes `PACKET_VALID = NO` and
+`SOURCE_STACK_QUALIFIED = NO`; it never samples, replaces, or shrinks a
+denominator. The global ceiling is exactly `100,000 = 50,000 + 40,000 +
+10,000`. Two retries are allowed for 408/429/5xx/transport and none for
+400/401/403/404/schema errors; 30-second stream and 10-second HTTP timeouts,
+raw response hashing, parser identity, and source-level cost accounting remain
+frozen.
 
 This preregistration authorizes none of the following:
 
@@ -232,14 +357,36 @@ Before closure, the implementer must verify:
 
 ```text
 V0_FILES_UNCHANGED = PASS
+H01_ABSOLUTE_UTC_PREFLIGHT_FROZEN = PASS
+H01_STALE_UTC_SYNC_FAIL_CLOSED = PASS
+H02_ONE_LATENCY_DATUM_PER_ELIGIBLE_ASSET = PASS
+H02_P95_DENOMINATOR_EQUALS_ELIGIBLE_UNIVERSE = PASS
+H02_FAILURES_CANNOT_IMPROVE_P95 = PASS
+H03_CLOCK_INTERVAL_BOUNDARIES_FROZEN = PASS
+H03_CLOCK_CLASSIFICATION_DETERMINISTIC = PASS
+H04_MARKET_STATE_TRIGGER_EVENT_FROZEN = PASS
+H04_MARKET_STATE_EXECUTION_ORDER_UNIQUE = PASS
+H04_MARKET_STATE_TEMPORAL_FEASIBILITY = PASS
+H05_ROLE_SPECIFIC_QUICKNODE_BUDGETS = PASS
+H05_SCHEDULER_ORDER_CANNOT_SELECT_CASES = PASS
+H05_RESOURCE_EXHAUSTION_FAIL_CLOSED = PASS
+H06_RFC8785_JCS_RESTORED = PASS
+H06_UNIVERSE_DIGEST_REPRODUCIBLE = PASS
+H06_AUDIT_SAMPLE_REPRODUCIBLE = PASS
+CARRIED_FORWARD_VALIDATED_SEMANTICS = PASS
+ZERO_DENOMINATOR_FAIL_CLOSED = PASS
+STAGE1_GATE_IDENTITY = PASS
+EXECUTION_RESOURCE_CLOSURE = PASS
 V1_RECEIPT_CLOCK_NEGATIVE_REJECTED = PASS
 V1_RECEIPT_CLOCK_SKEW_RULE_FROZEN = PASS
 V1_RECEIPT_CLOCK_TRANSIENT_STEP_DETECTION = PASS
 V1_MARKET_STATE_NON_TAUTOLOGICAL = PASS
+V1_MARKET_STATE_SUBSTANTIVE_OBSERVATION = PASS
 V1_MARKET_STATE_DENOMINATOR_INDEPENDENT_OF_SUCCESS = PASS
 V1_MARKET_STATE_TEMPORAL_CONTRACT = PASS
 V1_MARKET_STATE_FAILURE_REMAINS_IN_DENOMINATOR = PASS
 V1_STAGE1_GATES_UNCHANGED = PASS
+AUTHORIZATION_FAIL_CLOSED = PASS
 MARKDOWN_JSON_SEMANTIC_IDENTITY = PASS
 JSON_DIGEST_MATCH = PASS
 ```
