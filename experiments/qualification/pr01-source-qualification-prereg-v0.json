@@ -1,0 +1,330 @@
+{
+  "contract_id": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V0",
+  "state": "PREREGISTERED_NOT_EXECUTED",
+  "predecessor_sha": "42bc8003b280affc8da0bb484ea9468da32bb656",
+  "recorded_at": "2026-08-25T19:37:26Z",
+  "measurement_authorized": false,
+  "authorization": {
+    "live_provider_execution_authorized": false,
+    "paid_provider_spend_authorized": false,
+    "secret_read_authorized": false,
+    "solana_rpc_execution_authorized": false,
+    "source_measurement_run": false
+  },
+  "stage_1_gates": {
+    "successful_parse_rate": ">=99.5%",
+    "schema_violations": "<=0.5%",
+    "market_legible_universe_coverage": ">=95%",
+    "p95_discovery_latency_seconds": "<=120",
+    "first_buyer_availability": ">=95% of eligible assets",
+    "audited_first_buyer_identity_order_agreement": ">=99% with direct-chain truth",
+    "undocumented_semantic_shifts": "0"
+  },
+  "universe": {
+    "id": "SOLANA_UNIVERSE_CANDIDATE_V0",
+    "chain_id": "solana-mainnet-beta",
+    "asset_object": "fungible SPL Token or Token-2022 mint that is the non-quote side of a newly initialized Raydium CPMM pool",
+    "canonical_identity_key": ["chain_id", "mint_address"],
+    "names_symbols_are_identity": false,
+    "market_program": {
+      "name": "raydium-cp-swap",
+      "program_id": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+      "initialization_instructions": ["Initialize", "InitializeWithPermission"]
+    },
+    "quote_mints": [
+      "So11111111111111111111111111111111111111112",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    ],
+    "token_programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+    ],
+    "observation_window": {
+      "duration": "7x24h",
+      "start": "first UTC midnight after future host execution authorization",
+      "end": "start + 7 days",
+      "census_close": "end + 30 minutes"
+    },
+    "inclusion": [
+      "finalized successful Initialize or InitializeWithPermission invokes the frozen CPMM program",
+      "distinct sorted mint pair has exactly one fixed-set quote mint and one non-quote mint",
+      "init_amount_0 > 0 and init_amount_1 > 0",
+      "complete finalized pool, vault, mint, and token-program evidence exists",
+      "swap-disabled status bit is clear",
+      "open_time <= initialization blockTime"
+    ],
+    "exclusion": [
+      "failed transaction",
+      "non-CPMM or non-initialization event",
+      "two quote mints, two non-quote mints, identical mints, or unsupported token owner",
+      "zero initialization amount",
+      "swap-disabled pool",
+      "open_time after event blockTime",
+      "unresolvable identity collision"
+    ],
+    "newly_active": "earliest qualifying finalized initialization for the canonical mint identity within the window",
+    "timestamps": {
+      "source_event_at": "blockTime when non-null",
+      "source_slot_or_block": "finalized slot plus transaction array index",
+      "eligibility_knowledge_at": "fetched_at of first complete finalized census evidence",
+      "decision_boundary": "eligibility_knowledge_at"
+    },
+    "market_legibility": [
+      "positive initialization amounts",
+      "pool swap operation enabled",
+      "open_time not later than event blockTime",
+      "canonical mint/vault/token-program evidence complete"
+    ],
+    "duplicates_aliases_migrations": {
+      "dedupe": "retain earliest by slot, transaction index, instruction path, signature bytes; link later pools as duplicates",
+      "aliases": "metadata aliases, symbols, names, logos, and provider IDs ignored",
+      "migration": "new mint address is a new asset; never merge old and new mint",
+      "conflict": "AMBIGUOUS or UNAVAILABLE_OR_INVALID, never guessed"
+    },
+    "late_observation": "event inside window delivered after source-specific 10-minute boundary is LATE and remains in denominator; after census close cannot enter closed snapshot",
+    "unavailable_source": "UNAVAILABLE, TIMEOUT, MALFORMED, UNSUPPORTED, AMBIGUOUS, or UNAVAILABLE_OR_INVALID; never exclusion, zero, THIN, or parse success"
+  },
+  "providers": [
+    {
+      "provider_id": "HELIUS_LASERSTREAM_GRPC_MAINNET_V0",
+      "role": "DISCOVERY",
+      "product_api_family": "Helius LaserStream gRPC raw transactionUpdate filtered to Raydium CPMM initialization",
+      "documentation_urls": [
+        "https://www.helius.dev/docs/laserstream/grpc",
+        "https://www.helius.dev/docs/billing/rate-limits",
+        "https://www.helius.dev/pricing",
+        "https://www.helius.dev/terms"
+      ],
+      "authentication": "Helius account/API credential required later",
+      "free_paid": "mainnet LaserStream documented on Business and higher; paid reference",
+      "pricing_model": "public Business reference $499/month plus streaming data add-ons/credits; actual usage estimate only",
+      "rate_limit_semantics": "plan active connections/max pubkeys documented; exact filtered-stream delivery/billing unknown",
+      "pagination_semantics": "reconnect and historical replay documented; overlap/gap behavior unknown",
+      "ordering_semantics": "raw slot/transaction ordering to be measured; chain audit is authoritative",
+      "timestamp_semantics": "provider timestamps and delivery time to be measured; retain chain blockTime and fetched_at",
+      "schema_version_semantics": "Yellowstone/gRPC schema and deployed revision to be pinned before execution",
+      "historical_live_coverage_claim": "documented live transaction monitoring and historical replay; completeness unmeasured",
+      "known_limitations": ["stream is not chain truth", "disconnect/replay gaps", "provider schema/parser drift"],
+      "terms_constraint": "no unauthorized access, resale, sublicensing, or interference; verify raw-retention rights",
+      "credentials_required_later": true,
+      "evidence_classification": {
+        "DOCUMENTED": ["transaction monitoring", "program filters", "historical replay", "plan pricing/rate limits"],
+        "INFERRED": ["raw delivery can be decoded with pinned Raydium IDL without accepting provider semantic labels"],
+        "UNKNOWN_TO_BE_MEASURED": ["completeness", "latency", "disconnect loss", "replay overlap", "exact schema revision"]
+      }
+    },
+    {
+      "provider_id": "BIRDEYE_SOLANA_MARKET_DATA_V3",
+      "role": "MARKET_STATE",
+      "product_api_family": "Birdeye Token - All Market List /defi/v2/markets plus Token - Market Data /defi/v3/token/market-data",
+      "documentation_urls": [
+        "https://docs.birdeye.so/reference/tokenmarket-list",
+        "https://docs.birdeye.so/docs/compute-unit-cost",
+        "https://docs.birdeye.so/docs/per-api-rate-limit",
+        "https://docs.birdeye.so/reference/birdeye-api-getting-started",
+        "https://assets.birdeye.so/bds/policies/2025.04.11-tos.pdf"
+      ],
+      "authentication": "X-API-KEY required later",
+      "free_paid": "account/package/API key required; exact free eligibility unknown",
+      "pricing_model": "compute-unit based; public costs 30 CU for all-market-list and 10 CU for token market data; package price unknown",
+      "rate_limit_semantics": "public endpoint references 100 rpm all-market-list and 300 rpm token market data; account burst semantics unknown",
+      "pagination_semantics": "list family documents discovery/pool lists; exact cursor semantics for selected calls unknown",
+      "ordering_semantics": "provider ranking/order unknown; no ordering is used for truth",
+      "timestamp_semantics": "snapshot/as-of/correction semantics unknown; bind fetched_at and provider timestamps",
+      "schema_version_semantics": "endpoint response schema/version to be captured and pinned before execution",
+      "historical_live_coverage_claim": "market, liquidity, price, and transaction-flow data described; point-in-time completeness unmeasured",
+      "known_limitations": ["aggregated market layer may omit/reinterpret pools", "provider labels do not establish legibility", "absence is unavailable"],
+      "terms_constraint": "confirm API data retention, attribution, redistribution, and research-use terms for selected package",
+      "credentials_required_later": true,
+      "evidence_classification": {
+        "DOCUMENTED": ["market/pool list family", "market data family", "compute-unit costs", "published rate limits", "API-key authentication"],
+        "INFERRED": ["mint-address keyed market request can be joined to frozen chain mint identity"],
+        "UNKNOWN_TO_BE_MEASURED": ["coverage", "as-of semantics", "schema revision", "corrections", "provider pool completeness"]
+      }
+    },
+    {
+      "provider_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+      "role": "FIRST_BUYER",
+      "product_api_family": "Helius Enhanced Transactions legacy V1 transactions-by-address/get-transactions-by-signature",
+      "documentation_urls": [
+        "https://www.helius.dev/docs/api-reference/enhanced-transactions/gettransactions",
+        "https://www.helius.dev/docs/billing/rate-limits",
+        "https://www.helius.dev/docs/billing/credits",
+        "https://www.helius.dev/pricing",
+        "https://www.helius.dev/terms"
+      ],
+      "authentication": "Helius API key query parameter required later",
+      "free_paid": "plan/credits; public free and paid plan references",
+      "pricing_model": "credit-based plan pricing; exact selected endpoint cost to be measured/recorded",
+      "rate_limit_semantics": "plan Enhanced/DAS RPS, historical batch limits, 429 behavior documented; this packet permits two retries",
+      "pagination_semantics": "history pagination documented; maximum 20 pages per asset frozen here",
+      "ordering_semantics": "provider order is a claim only; QuickNode block/instruction order decides truth",
+      "timestamp_semantics": "parsed timestamp/correction semantics unknown; retain slot, blockTime, fetched_at",
+      "schema_version_semantics": "V1 legacy endpoint/schema pinned; V2 is not a silent substitution",
+      "historical_live_coverage_claim": "SPL-related parsed swaps/transfers and historical address transactions documented; unsupported types filtered",
+      "known_limitations": ["parsed SWAP label is not chain truth", "unsupported transaction types", "missing owner/order fields"],
+      "terms_constraint": "Helius account-use, anti-resale, and access terms apply",
+      "credentials_required_later": true,
+      "evidence_classification": {
+        "DOCUMENTED": ["parsed swaps/transfers", "history endpoint", "pagination", "V1/V2 distinction", "rate limits/retry guidance"],
+        "INFERRED": ["pool-address history can expose a candidate swap claim when required fields are present"],
+        "UNKNOWN_TO_BE_MEASURED": ["first-buyer availability", "inner-instruction completeness", "ordering fidelity", "semantic drift"]
+      }
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+      "role": "DIRECT_CHAIN_AUDIT",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC getSignaturesForAddress/getBlock/getTransaction and required account reads",
+      "documentation_urls": [
+        "https://solana.com/docs/rpc/http/getblock",
+        "https://solana.com/docs/rpc/http/gettransaction",
+        "https://solana.com/docs/rpc/json-structures",
+        "https://www.quicknode.com/docs/solana/getBlock",
+        "https://www.quicknode.com/docs/solana/getTransaction",
+        "https://www.quicknode.com/chains/solana",
+        "https://www.quicknode.com/pricing",
+        "https://www.quicknode.com/pt/terms"
+      ],
+      "authentication": "separate QuickNode endpoint/API key or account credential required later",
+      "free_paid": "public free trial and paid plans",
+      "pricing_model": "10M-credit free trial/no overage; Build reference $49/month; method credits/archive plan-dependent",
+      "rate_limit_semantics": "public RPS references free trial 15 and Build 50; method throttling/archive depth unknown",
+      "pagination_semantics": "getSignaturesForAddress before/until; getBlock full ordered transaction array; getTransaction by signature",
+      "ordering_semantics": "Solana finalized slot and getBlock transaction-array order; instruction paths from transaction metadata",
+      "timestamp_semantics": "slot and blockTime; blockTime may be null; fetched_at/recorded_at retained",
+      "schema_version_semantics": "standard Solana JSON-RPC method/encoding frozen; endpoint software/archive version captured later",
+      "historical_live_coverage_claim": "standard finalized block/transaction reads documented; historical completeness unmeasured",
+      "known_limitations": ["provider outage/pruning", "null or incomplete metadata", "rate limits"],
+      "terms_constraint": "limited product-use license and API-credit/plan terms; verify raw retention and redistribution",
+      "credentials_required_later": true,
+      "evidence_classification": {
+        "DOCUMENTED": ["standard JSON-RPC methods", "finalized commitment", "slot/blockTime/meta/instruction/token-balance fields", "public pricing/RPS"],
+        "INFERRED": ["raw JSON-RPC plus pinned Raydium IDL is an independent chain-native derivation path"],
+        "UNKNOWN_TO_BE_MEASURED": ["archive completeness", "availability", "method credit usage", "endpoint software version"]
+      }
+    }
+  ],
+  "source_role_independence": {
+    "first_buyer_source_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+    "direct_chain_audit_source_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+    "ids_must_differ": true,
+    "independence_frozen": true,
+    "independence_rule": "audit uses only separately controlled QuickNode raw JSON-RPC evidence and pinned Raydium interpretation; never Helius output, same-provider wrapper, cache, aggregator, or provider first-buyer ordering",
+    "pre_result_binding": "record separate endpoint identity, credential boundary, request hashes, and response hashes before inspecting either first-buyer or audit result",
+    "failure_state": "if separate path cannot be bound, AUDIT_SOURCE_INDEPENDENCE_FROZEN=NO and MEASUREMENT_AUTHORIZED=NO"
+  },
+  "first_buyer_semantics": {
+    "frozen": true,
+    "qualifying_acquisition": "successful single-hop Raydium CPMM SwapBaseInput or SwapBaseOutput transferring positive net candidate-mint amount from pool vault to one recipient token-account owner and positive quote amount into paired pool vault",
+    "success": "meta.err == null; missing explicit success state is unavailable",
+    "wallet_identity": "owner of recipient SPL Token/Token-2022 account; not token-account address, fee payer, pool authority, program, mint authority, or fee account",
+    "included_types": ["SwapBaseInput", "SwapBaseOutput", "CPI token transfers for the frozen pool"],
+    "excluded_types": ["Initialize", "Deposit", "Withdraw", "fee collection", "mint", "burn", "direct transfer", "airdrop", "LP movement", "self-transfer"],
+    "routed_behavior": "Jupiter/Raydium router, multiple pools, multiple swaps, or multi-hop transaction is OUT_OF_SCOPE_ROUTED and not a buyer",
+    "duplicates": "aggregate same-owner transfer rows within one qualifying swap; later acquisitions do not change first buyer",
+    "ambiguous": "multiple positive recipient owners, missing owner, missing required instruction path, or identity collision is AMBIGUOUS",
+    "unavailable": "provider/chain failure, missing required field, failed transaction, unsupported parser, or ambiguous case remains unavailable/invalid"
+  },
+  "chain_order": {
+    "frozen": true,
+    "order_key": ["finalized_slot", "getBlock_transaction_array_index", "outer_instruction_index", "inner_instruction_index", "nested_instruction_path", "signature_bytes_duplicate_tiebreaker"],
+    "primary": "finalized slot ascending",
+    "within_slot": "full getBlock transaction array order",
+    "within_transaction": "outer and CPI instruction path order",
+    "tie_breaker": "signature bytes only for duplicate provider records, never missing chain position",
+    "ambiguous_or_unavailable": "UNAVAILABLE_OR_INVALID; never guess"
+  },
+  "audit_population": {
+    "frozen": true,
+    "definition": "every distinct canonical asset in the closed universe snapshot with complete outcome-independent mint, pool, initial signature, slot, and vault identity fields",
+    "provider_absence_removes_case": false,
+    "outcome_filters_forbidden": ["provider success/failure", "parse result", "first-buyer answer", "chain agreement", "price", "volume", "survival", "attention"]
+  },
+  "audit_sampling": {
+    "frozen": true,
+    "snapshot": "full universe ledger at window end + 30 minutes, RFC8785/JCS bytes and SHA-256 digest committed before result inspection",
+    "sample_size": "min(200,N)",
+    "replacement": "without replacement; no replacement permitted",
+    "seed": "smokestack:pr01:source-qualification:audit-v0",
+    "score": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity)",
+    "selection": "unsigned hexadecimal byte sort, first min(200,N)",
+    "commitment": "SHA-256 of ordered selected canonical identity list",
+    "unavailable_selected_case": "retain in sample and denominator; no discretionary replacement"
+  },
+  "denominators": {
+    "logical_case_rule": "one stable scheduled case ID; retries are attempts and duplicates do not add denominator rows",
+    "parse": {
+      "numerator": "complete valid expected schema and mandatory fields",
+      "denominator": "all scheduled logical cases for role",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "invalid/malformed/timeout/unavailable/late fail parse; duplicates do not inflate; retries can yield final success but malformed payload remains schema evidence"
+    },
+    "schema": {
+      "numerator": "logical case with at least one non-duplicate received payload violating frozen schema/mandatory fields",
+      "denominator": "all scheduled logical cases for role",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "timeout without payload is not schema violation but is parse failure; duplicate conflict is schema evidence; retries do not change denominator"
+    },
+    "coverage": {
+      "numerator": "distinct frozen-universe asset with valid correctly joined market-state observation at eligibility boundary",
+      "denominator": "every asset in independent universe snapshot",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "all remain denominator and are not coverage success"
+    },
+    "discovery_latency": {
+      "numerator": "finite event-to-discovery fetched_at seconds per asset",
+      "denominator": "every frozen-universe asset",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "missing/timeout/unavailable/late beyond 10 minutes is +Infinity; p95 index is ceil(0.95*N)-1; duplicates do not inflate"
+    },
+    "first_buyer_availability": {
+      "numerator": "unambiguous first-buyer answer satisfying frozen semantics",
+      "denominator": "every audit-eligible asset",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "all are denominator and not availability success"
+    },
+    "audit_agreement": {
+      "numerator": "selected Helius identity and order exactly match QuickNode-derived chain truth",
+      "denominator": "every committed selected case",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "all are denominator and not agreement success; no replacement"
+    },
+    "semantic_shift": {
+      "numerator": "none; required count is zero undocumented shifts",
+      "denominator": "all source observations and schema/semantic changes during run",
+      "invalid_unavailable_malformed_timeout_duplicate_retry_late": "preserve lineage; documented captured versioned change is not undocumented, silent change fails"
+    }
+  },
+  "execution_shape": {
+    "frozen": true,
+    "evaluation_order": ["direct_chain_census_snapshot", "discovery", "market_state", "first_buyer", "direct_chain_audit_sample", "gate_calculation"],
+    "request_ceilings": {
+      "laserstream_connections": 1,
+      "laserstream_reconnects": 10,
+      "laserstream_replay_minutes_per_reconnect": 15,
+      "helius_history_pages_per_asset": 20,
+      "birdeye_market_requests_per_asset": 2,
+      "quicknode_signature_pages": 50000,
+      "quicknode_raw_rpc_calls_total": 100000
+    },
+    "retry_count": 2,
+    "retryable": ["408", "429", "5xx", "transport"],
+    "non_retryable": ["400", "401", "403", "404", "schema_error"],
+    "concurrency": {"stream": 1, "birdeye": 4, "helius_history": 4, "quicknode": 8},
+    "timeouts_seconds": {"stream_operation": 30, "http_request": 10},
+    "raw_evidence": "request metadata, permitted response bytes/reference, SHA-256, source/schema/parser identity, timestamps, attempts, and costs retained at least 24 months",
+    "parser_identity": "later harness commit SHA, Node/npm, contract digest, schema revisions, and parser version bound before first request; post-request change creates new packet",
+    "cost_accounting": "plan, fixed fee, credits, requests, retries, bytes, overages, and invoice/usage evidence per source",
+    "semantic_drift_detection": "pre-capture docs and timestamps; compare schema, enums, timestamps, order, pagination, missingness throughout; undocumented shift fails",
+    "failure_preservation": "never delete, hide, or denominator-edit failed, late, duplicate, unavailable, invalid, or selected cases"
+  },
+  "public_cost_estimate": {
+    "estimate_only": true,
+    "helius_business_reference": "$499/month",
+    "quicknode_build_reference": "$49/month",
+    "birdeye": "package and usage price unknown from selected public docs",
+    "minimum_public_fixed_reference_before_usage": "$548/month plus Birdeye",
+    "actual_spend": "NONE"
+  },
+  "exit": {
+    "allowed_state": "PREREGISTERED_NOT_EXECUTED",
+    "source_stack_qualified": false,
+    "next_gate": "PR01_PREREG_INDEPENDENT_REVIEW",
+    "pr02": "NOT_STARTED"
+  }
+}
