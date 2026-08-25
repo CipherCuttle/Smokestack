@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { isUtf8 } from 'node:buffer';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { homedir } from 'node:os';
@@ -291,6 +292,13 @@ function parseGitConfigRecords(text, label) {
   return records;
 }
 
+function decodeGitConfigUtf8(bytes, label) {
+  if (!Buffer.isBuffer(bytes) || !isUtf8(bytes)) {
+    throw new Error(`${label} Git config contains invalid UTF-8`);
+  }
+  return bytes.toString('utf8');
+}
+
 function resolveGitConfigReference(cwd, expandedValue) {
   if (typeof expandedValue !== 'string' || expandedValue.length === 0 || expandedValue.includes('\0')) {
     throw new Error('Git file reference is empty or malformed');
@@ -314,10 +322,10 @@ function gitConfigReferenceRecords(cwd, scopeArgs, label) {
     '--null',
     '--get-regexp',
     '^(core.attributesfile|core.excludesfile)$',
-  ], { cwd });
-  if (result.exit === 1 && result.stdout === '') return [];
+  ], { cwd, encoding: null });
+  if (result.exit === 1 && result.stdout.length === 0) return [];
   if (result.exit !== 0) throw new Error(`cannot inspect ${label} Git config references: ${result.stderr}`);
-  return parseGitConfigRecords(result.stdout, `${label} reference`);
+  return parseGitConfigRecords(decodeGitConfigUtf8(result.stdout, `${label} reference`), `${label} reference`);
 }
 
 function defaultGitConfigReference(cwd, fileName) {
@@ -346,14 +354,15 @@ export function captureGitMetadataState(cwd) {
       if (!authorities.some((authority) => within(authority, file))) throw new Error(`Git metadata path escapes authority: ${name}`);
       files[path.relative(root, file) || name] = metadataFileFingerprint(file, authorities);
     }
-    const localConfig = runSync('git', ['config', '--local', '--includes', '--show-origin', '--null', '--list'], { cwd });
+    const localConfig = runSync('git', ['config', '--local', '--includes', '--show-origin', '--null', '--list'], { cwd, encoding: null });
     if (localConfig.exit !== 0) throw new Error(`cannot inspect local Git config: ${localConfig.stderr}`);
-    if (Buffer.byteLength(localConfig.stdout, 'utf8') > MAX_GIT_METADATA_FILE) throw new Error('effective local Git config too large');
+    const localConfigText = decodeGitConfigUtf8(localConfig.stdout, 'local');
+    if (localConfig.stdout.length > MAX_GIT_METADATA_FILE) throw new Error('effective local Git config too large');
     files['<effective-local-config>'] = {
       present: true,
       sha256: crypto.createHash('sha256').update(localConfig.stdout).digest('hex'),
     };
-    const configRecords = parseGitConfigRecords(localConfig.stdout, 'local');
+    const configRecords = parseGitConfigRecords(localConfigText, 'local');
     for (const record of configRecords) {
       if (!record.origin.startsWith('file:')) throw new Error(`local Git config has non-file origin: ${record.origin}`);
       const origin = path.resolve(cwd, record.origin.slice('file:'.length));
@@ -375,9 +384,10 @@ export function captureGitMetadataState(cwd) {
         fingerprint: metadataFileFingerprint(target, authorities),
       };
     }
-    const effectiveConfig = runSync('git', ['config', '--includes', '--show-origin', '--null', '--list'], { cwd });
+    const effectiveConfig = runSync('git', ['config', '--includes', '--show-origin', '--null', '--list'], { cwd, encoding: null });
     if (effectiveConfig.exit !== 0) throw new Error(`cannot inspect effective Git config: ${effectiveConfig.stderr}`);
-    if (Buffer.byteLength(effectiveConfig.stdout, 'utf8') > MAX_GIT_METADATA_FILE) throw new Error('effective Git config too large');
+    decodeGitConfigUtf8(effectiveConfig.stdout, 'effective');
+    if (effectiveConfig.stdout.length > MAX_GIT_METADATA_FILE) throw new Error('effective Git config too large');
     files['<effective-git-config>'] = {
       present: true,
       sha256: crypto.createHash('sha256').update(effectiveConfig.stdout).digest('hex'),

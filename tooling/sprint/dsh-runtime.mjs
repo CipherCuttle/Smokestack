@@ -10,10 +10,11 @@ const toolGuardSource = path.join(here, 'dsh-tool-call-guard.mjs');
 
 export function runSync(cmd, args, opts = {}) {
   const started = Date.now();
+  const encoding = opts.encoding === undefined ? 'utf8' : opts.encoding;
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     env: { ...process.env, ...(opts.env ?? {}) },
-    encoding: 'utf8',
+    encoding,
     maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
     timeout: opts.timeoutMs ?? 120_000,
     stdio: opts.stdio,
@@ -23,7 +24,7 @@ export function runSync(cmd, args, opts = {}) {
     args,
     exit: r.status ?? (r.error ? 125 : 0),
     signal: r.signal ?? null,
-    stdout: typeof r.stdout === 'string' ? r.stdout : '',
+    stdout: r.stdout ?? '',
     stderr: typeof r.stderr === 'string' ? r.stderr : (r.error ? String(r.error) : ''),
     duration_ms: Date.now() - started,
   };

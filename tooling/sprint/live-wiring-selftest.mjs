@@ -35,6 +35,13 @@ function gitPathValue(cwd, key) {
   return result.stdout.slice(0, -1);
 }
 
+function gitPathBytes(cwd, key) {
+  const result = spawnSync('git', ['config', '--local', '--path', '--null', '--get', key], { cwd, encoding: null });
+  if ((result.status ?? 125) !== 0) throw new Error(`git config ${key} failed: ${result.stderr?.toString('utf8')}`);
+  assert.equal(result.stdout.at(-1), 0, `Git path output was not NUL terminated: ${result.stdout.toString('hex')}`);
+  return result.stdout.subarray(0, -1);
+}
+
 function referenceFingerprint(file) {
   const stat = fs.statSync(file, { bigint: true });
   return {
@@ -623,6 +630,66 @@ test('Git-consumed whitespace-bearing attributes paths are bound losslessly', ()
           assert.equal(compareGitMetadataState(before, captureGitMetadataState(cwd)).ok, false, `${scenario.name}: mutation was not attested`);
         }
       }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  } finally {
+    if (previous.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.global;
+    if (previous.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = previous.system;
+    if (previous.home === undefined) delete process.env.HOME;
+    else process.env.HOME = previous.home;
+    fs.rmSync(external, { recursive: true, force: true });
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test('invalid UTF-8 Git paths fail closed before U+FFFD aliasing', () => {
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-invalid-utf8-'));
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), 'smokestack-invalid-utf8-home-'));
+  const globalConfig = path.join(configHome, 'global.config');
+  const previous = {
+    global: process.env.GIT_CONFIG_GLOBAL,
+    system: process.env.GIT_CONFIG_NOSYSTEM,
+    home: process.env.HOME,
+  };
+  try {
+    fs.writeFileSync(globalConfig, '');
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.HOME = configHome;
+    const cwd = createReconciliationRepo();
+    try {
+      const tracked = path.join(cwd, 'experiments/qualification/tracked.txt');
+      const rawPath = Buffer.concat([Buffer.from(external), Buffer.from('/attributes-'), Buffer.from([0xff])]);
+      const replacementAlias = rawPath.toString('utf8');
+      assert.equal(rawPath.at(-1), 0xff, 'test pathname must contain a real invalid UTF-8 byte');
+      assert.match(replacementAlias, /\uFFFD/, 'raw pathname must decode to a replacement character for the inherited seam');
+      fs.writeFileSync(rawPath, '*.txt text\n');
+      fs.writeFileSync(replacementAlias, '*.txt text\n');
+      fs.appendFileSync(path.join(cwd, '.git/config'), Buffer.concat([
+        Buffer.from('\n[core]\n\tattributesFile = "'),
+        rawPath,
+        Buffer.from('"\n'),
+      ]));
+
+      const gitConsumedPath = gitPathBytes(cwd, 'core.attributesFile');
+      assert.deepEqual(gitConsumedPath, rawPath, 'Git must consume the exact raw pathname bytes');
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: set/);
+
+      const legacyBefore = captureLegacyTrimmedReference(cwd);
+      assert.equal(legacyBefore.files.reference.target, replacementAlias, 'inherited UTF-8 seam must bind the U+FFFD alias');
+      fs.writeFileSync(rawPath, '*.txt -text\n');
+      assert.match(runGit(cwd, ['check-attr', 'text', '--', tracked]), /text: unset/);
+      const legacyAfter = captureLegacyTrimmedReference(cwd);
+      assert.equal(compareGitMetadataState(legacyBefore, legacyAfter).ok, true, 'inherited lossy attestation must reproduce the falsely clean result');
+
+      const repaired = captureGitMetadataState(cwd);
+      assert.equal(repaired.ok, false, JSON.stringify(repaired));
+      assert.match(repaired.error, /invalid UTF-8/);
+      assert.equal(compareGitMetadataState(repaired, repaired).ok, false, 'invalid UTF-8 state must not be accepted as clean');
+      assert.notEqual(repaired.files?.reference?.target, replacementAlias, 'U+FFFD aliasing must never be accepted by the repaired seam');
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
