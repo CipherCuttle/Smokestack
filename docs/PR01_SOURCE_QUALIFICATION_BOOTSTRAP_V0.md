@@ -24,7 +24,8 @@ qualification, not a Formation, attention, efficacy, or trading evaluation.
 
 ## Source roles
 
-Every future candidate source is assigned one or more explicit roles:
+Every future candidate source is assigned one or more explicit roles, subject
+to the source-role independence gate below:
 
 - `DISCOVERY`: identify assets entering the frozen candidate universe and the
   time/order information needed for eligibility.
@@ -37,6 +38,31 @@ Every future candidate source is assigned one or more explicit roles:
 
 Provider roles are not interchangeable. A fallback or aggregation is a new
 source observation with explicit semantics.
+
+## Source-role independence gate
+
+The same candidate source MUST NOT carry both `FIRST_BUYER` and
+`DIRECT_CHAIN_AUDIT`. Qualification must bind two explicitly identified,
+distinct source identities:
+
+- `FIRST_BUYER_SOURCE_ID`
+- `DIRECT_CHAIN_AUDIT_SOURCE_ID`
+
+The qualification packet MUST require
+`FIRST_BUYER_SOURCE_ID != DIRECT_CHAIN_AUDIT_SOURCE_ID`. A source identity
+includes its controlled source/data path, not merely a display label or role
+name.
+
+`DIRECT_CHAIN_AUDIT` truth MUST be independently derived from chain-native
+transaction, instruction, and/or account evidence. It MUST NOT derive its
+truth from:
+
+- the `FIRST_BUYER` source's interpreted first-buyer endpoint;
+- the same provider-derived first-buyer dataset;
+- a re-export, cache, or aggregation of that same derived dataset; or
+- the `FIRST_BUYER` candidate's claimed ordering.
+
+The preregistration packet MUST identify and establish an independently controlled source/data path for chain truth before measurement. If that independence cannot be established, `AUDIT_RESULT = INVALID_OR_UNAVAILABLE` and it MUST NOT be counted as audited agreement success. A fallback or aggregation is a new explicitly identified source observation; labeling it `DIRECT_CHAIN_AUDIT` does not inherit audit independence.
 
 ## Frozen Stage-1 gates
 
@@ -90,6 +116,115 @@ value for each requirement and bind it to the packet identity:
 
 No universe value, provider coverage result, or qualification verdict may be
 reported while this contract is deferred.
+
+## First-buyer audit preregistration gate
+
+Before ANY provider/source measurement, one immutable preregistration packet
+MUST bind concrete deterministic values for all first-buyer and audit
+authorization fields below. The packet identity, its content-addressed
+digest, and the time of authorization MUST be recorded before any
+`FIRST_BUYER` or `DIRECT_CHAIN_AUDIT` result is inspected. This bootstrap
+freezes the authorization contract but does not invent the eventual semantic
+values, universe, provider candidates, audit sample size, or sample seed.
+
+The current state remains fail-closed:
+
+- `FIRST_BUYER_SEMANTICS_FROZEN = NO`
+- `CHAIN_ORDER_CONVENTION_FROZEN = NO`
+- `AUDIT_ELIGIBLE_POPULATION_FROZEN = NO`
+- `AUDIT_SAMPLING_FRAME_FROZEN = NO`
+- `AUDIT_SOURCE_INDEPENDENCE_FROZEN = NO`
+- `MEASUREMENT_AUTHORIZED = NO`
+
+### First-buyer definition
+
+The preregistration MUST freeze a mechanically evaluable first-buyer
+definition, including the rules necessary to disambiguate:
+
+- qualifying acquisition/transaction semantics;
+- successful versus failed transactions;
+- wallet/account identity;
+- included and excluded transaction/instruction types;
+- routing and aggregation behavior;
+- duplicate activity;
+- self-transfer and other non-acquisition behavior; and
+- ambiguous cases and their result state.
+
+No first-buyer semantic value may be selected or changed after measurement
+begins.
+
+### Chain order convention
+
+The preregistration MUST freeze a total deterministic ordering convention for
+the chain evidence used to decide first-buyer identity and order, including
+the chain-order primitives, deterministic tie-breakers, and handling when a
+required primitive is absent or ambiguous. If deterministic ordering cannot
+be established, the result is `UNAVAILABLE_OR_INVALID`; it MUST NOT be
+silently guessed.
+
+### Audit-eligible population
+
+The preregistration MUST freeze the exact population from which audit cases
+may be selected. That population MUST derive from the frozen universe and
+eligibility rules plus outcome-independent observable criteria. It MUST NOT
+be filtered after observing provider success/failure, parse success/failure,
+first-buyer claims, chain-truth agreement/disagreement, or later outcomes.
+Provider absence MUST NOT remove a case from the frozen population.
+
+### Audit sampling frame
+
+Before observing either `FIRST_BUYER` or `DIRECT_CHAIN_AUDIT` results, the
+preregistration MUST freeze:
+
+- the population snapshot and identity;
+- the sample-selection algorithm;
+- the sample size or a deterministic stopping rule;
+- a deterministic seed/hash or equivalent reproducible selector;
+- sampling with or without replacement;
+- handling of unavailable, failed, or ambiguous selected cases; and
+- any permitted replacement rule.
+
+The selected sample, or a deterministic selection commitment, MUST be
+content-addressed and digest-bound before result inspection. Difficult,
+failed, unavailable, malformed, or ambiguous cases MUST NOT be replaced at
+operator discretion. Selected cases remain visible in the audit lineage, and
+the denominator treatment frozen below applies to them.
+
+### Denominator preregistration
+
+The preregistration MUST freeze the exact, deterministic treatment of every
+selected and eligible case in the availability denominator, the
+audit-agreement denominator, and invalid/unavailable accounting before
+measurement. No post-observation denominator selection is permitted.
+
+For this bootstrap, the fail-closed denominator invariant is:
+
+- every asset in the frozen audit-eligible population remains in the
+  first-buyer availability denominator, including unavailable, malformed,
+  ambiguous, provider-failure, and chain-audit-failure states;
+- every committed audit sample case remains in the audit-agreement
+  denominator; unavailable, malformed, ambiguous, provider-failure,
+  chain-audit-failure, and disagreement states are not audited agreement
+  success; and
+- each unavailable or invalid state is retained in invalid/unavailable
+  accounting with its reason and lineage, rather than removed from either
+  denominator.
+
+The packet MUST bind the exact status mapping and reporting treatment before
+measurement, and MUST preserve these cases even when the mapping yields a
+failed gate. The quantitative gates remain unchanged, including first-buyer
+availability >= 95% of eligible assets and audited first-buyer
+identity/order >= 99% agreement with direct-chain truth.
+
+### Measurement authorization predicate
+
+Source measurement remains unauthorized unless every required preregistration
+field is frozen and bound, the provider candidate set and universe candidate
+are frozen, and host execution authorization is present:
+
+`MEASUREMENT_AUTHORIZED = SOLANA_UNIVERSE_CANDIDATE_V0_FROZEN AND PROVIDER_CANDIDATE_SET_FROZEN AND FIRST_BUYER_SEMANTICS_FROZEN AND CHAIN_ORDER_CONVENTION_FROZEN AND AUDIT_ELIGIBLE_POPULATION_FROZEN AND AUDIT_SAMPLING_FRAME_FROZEN AND AUDIT_SOURCE_INDEPENDENCE_FROZEN AND HOST_EXECUTION_AUTHORIZATION_PRESENT`
+
+The current value remains `MEASUREMENT_AUTHORIZED = NO`.
 
 ## Provider-candidate authority
 
