@@ -14,7 +14,7 @@
 - `LIVE_PROVIDER_EXECUTION_AUTHORIZED = NO`
 - `PR02 = NOT_STARTED`
 - Exact JSON: [`experiments/qualification/pr01-source-qualification-prereg-v4.json`](../experiments/qualification/pr01-source-qualification-prereg-v4.json)
-- JSON SHA-256: `4dec1d61ff57fc01327365a9f2348e348753277098a3d921934962d2e0f099ac`
+- JSON SHA-256: `f519eaacc31ad050013a145ff7af7cf13983cb3540d4cbf8eccdbe9bf9b4153c`
 - Historical V3 repair source: `7805046e6fac291d87fa8431f8f9166cb9f86284`
 - `HISTORICAL_FAILED_V3_RULE_NONAUTHORITATIVE`: V3's remaining C01 fixed-window failure is historical input only; V4 freezes the exact window literals below and does not modify V3.
 
@@ -202,7 +202,7 @@ WINDOW_START_STRING = "2026-09-07T00:00:00Z"
 WINDOW_END_STRING   = "2026-09-14T00:00:00Z"
 ```
 
-The exact preimage object, with no missing/null/extra members:
+The exact immutable window object, with no missing, null, or extra members, is:
 
 ```json
 {
@@ -213,8 +213,9 @@ The exact preimage object, with no missing/null/extra members:
 ```
 
 ```text
-window_claim_preimage = UTF8(RFC8785_JCS(exact object above))
-WINDOW_CLAIM_KEY = lowercase_hex(SHA256(window_claim_preimage))
+window_claim_preimage = UTF8(RFC8785_JCS(exact_window_object))
+computed_window_claim_key = lowercase_hex(SHA256(window_claim_preimage))
+computed_window_claim_key = b35f8fdce6e922321702aad67c321ab9eb638b456388b00de3e5a90e52f79e08
 ```
 
 This exact formula is authoritative; no "equivalently exact byte contract"
@@ -229,36 +230,82 @@ exact duplicate `WINDOW_CLAIM_KEY` but any second qualification claim whose
 observation interval overlaps a previously consumed interval in that
 namespace. A successor cannot evade consumption with
 `2026-09-07T00:00:01Z` or `2026-09-06T23:59:59Z` — both overlap the
-consumed V4 window.
+consumed V4 window. The `CLAIM_ONCE` request must carry at minimum:
+
+```text
+namespace
+window_start
+window_end
+window_claim_key
+episode_id
+writer_public_key
+initial_claim_digest
+v4_candidate_identity
+```
+
+The V4 candidate identity is the tuple:
+
+```json
+{
+  "contract_id": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V4",
+  "reviewed_candidate_commit": "788ec53a42f53c681cfed07ac0af663da5c9b56b",
+  "canonical_predecessor": "42bc8003b280affc8da0bb484ea9468da32bb656"
+}
+```
+
+The external witness must itself validate the exact timestamp representation,
+reconstruct the exact immutable window object, RFC8785/JCS-canonicalize it,
+UTF-8 encode it, recompute the lowercase hexadecimal SHA-256 key, and require
+the supplied `window_claim_key` to equal that server-recomputed key. It then
+evaluates overlap against every previously consumed interval in the permanent
+namespace and atomically either rejects or consumes the interval.
+
+Intervals are half-open, `[start, end)`, and overlap exactly when:
+
+```text
+max(start_a, start_b) < min(end_a, end_b)
+```
+
+The overlap check and successful `CLAIM` append/interval consumption are one
+atomic, linearizable witness operation. There is no state in which the witness
+acknowledges a claim without a consumed interval registry entry, or consumes
+an interval without a discoverable `CLAIM` record. Changing version,
+`episode_id`, writer, machine, process, local database, or contract digest
+cannot bypass overlap rejection.
 
 ## C. Claim order — witness is the global claim authority
 
-The prior order (local claim, then witness) is insufficient and is
-replaced. The external witness must provide an atomic `CLAIM_ONCE`
-operation keyed by `(PR01_WINDOW_NAMESPACE, WINDOW_CLAIM_KEY)`. The witness
-itself is the cross-machine uniqueness authority: exactly one `CLAIM_ONCE`
-may ever succeed for a window. A fresh machine, local DB, `episode_id`,
-contract revision, or writer must not bypass it.
+The external witness is the cross-machine uniqueness authority. It receives
+the exact interval object, the recomputed-key-bearing claim request, and the
+episode binding. Exactly one `CLAIM_ONCE` may ever succeed for an overlapping
+window in the permanent namespace. A fresh machine, local database,
+`episode_id`, contract revision, or writer must not bypass it.
 
-The exact frozen state order is:
+The exact frozen state order is the sole authoritative machine-readable
+pre-data order in `execution_shape.evaluation_order`:
 
 ```text
 V4_TERMINAL_PASS
-→ execution authorization bound
-→ exact fixed window verified
-→ exact claim object constructed
-→ WITNESS CLAIM_ONCE
-→ witness durable inclusion established
-→ witness receipt independently verified
-→ local durable claim mirror written
-→ CLAIM_ANCHORED_AT computed
-→ claim deadline verified
-→ CLAIM_ANCHORED = YES
-→ DATA_START permitted
+→ EXECUTION_AUTHORIZATION_BOUND
+→ VERIFY_FROZEN_WINDOW_LITERALS
+→ CONSTRUCT_EXACT_CLAIM
+→ WITNESS_NAMESPACE_GENESIS_BOUND
+→ WITNESS_CLAIM_ONCE
+→ WITNESS_CLAIM_DURABLY_INCLUDED
+→ WITNESS_CLAIM_RECEIPT_VERIFIED
+→ LOCAL_DURABLE_CLAIM_MIRROR_WRITTEN
+→ COMPUTE_CLAIM_ANCHORED_AT
+→ VERIFY_CLAIM_ANCHORED_AT_LT_CLAIM_ANCHOR_DEADLINE
+→ APPEND_AND_VERIFY_CLAIM_ANCHORED_EVENT
+→ LIVE_EXECUTION_ELIGIBLE
+→ APPEND_AND_VERIFY_DATA_STARTED
+→ FIRST_PROVIDER_OR_DATA_OPERATION
 ```
 
 No data/provider/RPC/secret/spend/census operation is permitted before this
-sequence completes:
+sequence completes. In particular, `APPEND_AND_VERIFY_DATA_STARTED` must
+succeed before the first provider connection, Solana RPC, census request, or
+other live data operation.
 
 - provider connection
 - Solana RPC
@@ -268,21 +315,21 @@ sequence completes:
 - census
 - data-dependent measurement
 
-Boundary equality fails:
+The authoritative temporal predicate is:
 
 ```text
-CLAIM_ANCHORED_AT == CLAIM_ANCHOR_DEADLINE  =>  INVALID
+CLAIM_ANCHORED_AT < CLAIM_ANCHOR_DEADLINE
 ```
 
-If `CLAIM_ONCE` succeeds but the client crashes before local persistence,
-`WINDOW_CONSUMED = YES`; a later process queries the witness by
-`WINDOW_CLAIM_KEY` and sees the existing claim, and it must not create
-another claim. If a submission result is ambiguous: query the witness by
-`WINDOW_CLAIM_KEY`. If an existing claim exists, the window is consumed. If
-absence cannot be established because the witness is unavailable, **FAIL
-CLOSED** — no data starts. Only if the authoritative witness proves no
-claim exists may the same pre-data submission attempt be retried. No
-outcome data exists or has been fetched at any point in this sequence.
+If `CLAIM_ANCHORED_AT >= 2026-09-06T00:00:00Z`, exactly
+`V4_LIVE_EPISODE_ELIGIBLE = NO` and `MEASUREMENT_AUTHORIZED = NO`. There is
+no later V4 window, fallback, next-midnight choice, or recomputation.
+
+`CLAIM_ONCE` succeeds before the local mirror is written. If the local mirror
+write fails or the client crashes, `WINDOW_CONSUMED = YES`; the external
+witness `CLAIM` remains authoritative and discoverable. A fresh machine must
+query and recover that claim and must not create another claim. If witness
+state cannot be queried, execution **FAILS CLOSED** and no data starts.
 
 ## C-bis. Authoritative claim time
 
@@ -313,6 +360,11 @@ The client may not supply or override `WITNESS_INCLUDED_AT`. An actual
 witness implementation is execution-ineligible unless its receipt semantics
 prove the timestamp is server-assigned at durable inclusion.
 
+The deadline gate is evaluated after witness receipt verification and before
+the witnessed `CLAIM_ANCHORED` append. If the predicate fails, the exact
+result is `V4_LIVE_EPISODE_ELIGIBLE = NO` and `MEASUREMENT_AUTHORIZED = NO`;
+there is no fallback window or recomputation.
+
 ## D. Actual external witness trust boundary (resolves D1)
 
 Future live execution **must not** use an in-process-only witness. Same-
@@ -321,14 +373,15 @@ witness requirements are:
 
 - separate process/service trust domain;
 - separate durable persistence;
-- an atomic `CLAIM_ONCE` operation as the cross-machine uniqueness
-  authority (Section C);
+- an atomic interval-aware `CLAIM_ONCE` operation as the cross-machine
+  uniqueness authority (Section B and Section C);
 - append-only normal API;
 - runtime qualification credentials have APPEND/READ/VERIFY only;
 - runtime credentials have NO delete/rewrite/truncate operation;
 - service returns a durable receipt/inclusion identifier;
-- `claim_digest` is bound in the witnessed record;
+- `initial_claim_digest` is bound in the witnessed record;
 - `window_claim_key` and `writer_public_key` are bound;
+- `namespace_genesis_id` and `namespace_genesis_digest` are bound;
 - a server-generated `WITNESS_INCLUDED_AT` is bound (Section C-bis);
 - witness receipt can later be independently verified;
 - local database rollback/truncation is detectable by comparison with the
@@ -423,6 +476,32 @@ external PR01 event log, under one permanent namespace:
 PR01_LINEAGE_NAMESPACE = "smokestack:pr01:source-qualification:solana-mainnet-beta"
 ```
 
+The production witness initializes this permanent namespace with exactly:
+
+```text
+CREATE_OR_GET_NAMESPACE_ROOT(
+  PR01_LINEAGE_NAMESPACE,
+  frozen_genesis_payload
+)
+```
+
+```json
+{
+  "namespace": "smokestack:pr01:source-qualification:solana-mainnet-beta",
+  "protocol_id": "PR01_SOURCE_QUALIFICATION",
+  "canonical_predecessor": "42bc8003b280affc8da0bb484ea9468da32bb656"
+}
+```
+
+The actual witness must return authenticated `NAMESPACE_GENESIS_ID`,
+`NAMESPACE_GENESIS_DIGEST`, `NAMESPACE_GENESIS_RECEIPT`, and
+`NAMESPACE_GENESIS_CHECKPOINT`. Their concrete values are
+`TO_BE_BOUND_BY_EXECUTION_AUTHORIZATION_BEFORE_CLAIM` because the production
+witness is not yet authorized/bound. Their semantics are fixed: an existing
+namespace returns the same permanent root, and no later PR01 version may
+create another root. Execution authorization must bind all returned values
+before `CLAIM_ONCE`.
+
 Every V4 episode event — not merely `CLAIM`/`SAMPLE_COMMITTED`/`TERMINAL_*`
 — must be externally witnessed. Frozen canonical event classes:
 
@@ -437,12 +516,36 @@ TERMINAL_FAIL
 TERMINAL_ABORT
 ```
 
-Each witness event binds exact: `namespace`, `witness_sequence`,
-`episode_id`, `window_claim_key`, `writer_public_key`, `event_type`,
+Each witness event binds exact: `namespace`, `namespace_genesis_id`,
+`namespace_genesis_digest`, `witness_sequence`, `episode_id`,
+`window_claim_key`, `initial_claim_digest`, `writer_public_key`, `event_type`,
 `payload_digest`, `previous_witness_event_digest`, `event_digest`.
 
-The external witness must provide `CLAIM_ONCE(window_claim_key, ...)`,
-`APPEND_EVENT(...)`, `READ_EVENT(...)`, `LIST_NAMESPACE_FROM(sequence)`,
+At successful `CLAIM_ONCE`, the witness freezes this immutable episode tuple:
+
+```text
+EPISODE_BINDING = {
+  namespace_genesis_id,
+  namespace_genesis_digest,
+  episode_id,
+  window_claim_key,
+  initial_claim_digest,
+  writer_public_key
+}
+```
+
+The `CLAIM` event establishes it. Every later event for that episode must
+contain exactly the same six values; the witness rejects any mismatch and
+the final verifier independently asserts equality across the complete
+episode. In particular, no later event may change `episode_id`,
+`window_claim_key`, `initial_claim_digest`, `writer_public_key`,
+`namespace_genesis_id`, or `namespace_genesis_digest`.
+
+The external witness must provide
+`CREATE_OR_GET_NAMESPACE_ROOT(namespace, frozen_genesis_payload)`,
+`CLAIM_ONCE(exact_window_object, window_claim_key, episode_binding,
+v4_candidate_identity)`, `APPEND_EVENT(...)`, `READ_EVENT(...)`,
+`LIST_NAMESPACE_FROM_GENESIS(namespace, NAMESPACE_GENESIS_ID)`,
 `CURRENT_CHECKPOINT()`, `VERIFY_INCLUSION(...)`, `VERIFY_CONSISTENCY(...)`
 — or one exact interface with equivalent required semantics:
 
@@ -450,9 +553,14 @@ The external witness must provide `CLAIM_ONCE(window_claim_key, ...)`,
 - append-only;
 - previously acknowledged events cannot disappear;
 - independently queryable complete namespace history;
+- first returned namespace record is the authenticated genesis/root;
+- all subsequent `witness_sequence` values are contiguous under the
+  namespace ordering contract;
+- no unexplained sequence or event gap;
 - signed/authenticated current checkpoint/head;
 - inclusion verification for every returned event;
-- consistency verification that a newer checkpoint extends an older one;
+- consistency proof that the current checkpoint extends the pinned genesis
+  checkpoint;
 - runtime qualification credentials cannot delete/rewrite/truncate history.
 
 A final qualification verifier **must independently query the witness
@@ -460,17 +568,26 @@ namespace**. It must not merely verify receipts supplied by the local
 process. Final verification algorithm:
 
 1. obtain current authenticated witness checkpoint;
-2. enumerate every `PR01_LINEAGE_NAMESPACE` event from the required genesis
-   / prior canonical checkpoint through current checkpoint;
-3. verify all event inclusion;
-4. verify checkpoint consistency;
-5. reconstruct every claimed/started window;
-6. compare against local lineage;
-7. reject if any external event/window is absent locally;
-8. reject success-only selective presentation;
-9. reject dangling `CLAIM`/`DATA_STARTED` unless represented by a
+2. enumerate every `PR01_LINEAGE_NAMESPACE` event with
+   `LIST_NAMESPACE_FROM_GENESIS(PR01_LINEAGE_NAMESPACE,
+   NAMESPACE_GENESIS_ID)`;
+3. require the first returned namespace record to be the authenticated pinned
+   genesis/root and require contiguous witness sequences with no unexplained
+   gap;
+4. verify all event inclusion;
+5. verify the current checkpoint extends the pinned genesis checkpoint;
+6. reject any supplied older/later checkpoint that replaces the pinned
+   genesis;
+7. reconstruct every claimed/started window and assert exact episode binding;
+8. compare against local lineage;
+9. reject if any external event/window is absent locally;
+10. reject success-only selective presentation;
+11. reject history that begins after genesis, any omitted prior event, a
+    sequence gap, an inconsistent checkpoint, a namespace-genesis mismatch,
+    or local history that omits any externally witnessed event;
+12. reject dangling `CLAIM`/`DATA_STARTED` unless represented by a
    terminally invalid/unfinished lineage state;
-10. require the current V4 event chain to be complete.
+13. require the current V4 event chain to be complete.
 
 Verification of one supplied receipt is **not** lineage completeness. A
 final PASS requires:
@@ -505,10 +622,11 @@ CLAIM → ...any valid prefix... → TERMINAL_ABORT
 Once `TERMINAL_*` occurs, no later event is valid: no second
 `DATA_STARTED`, no second `SAMPLE_COMMITTED`, no transition backward, no
 episode resurrection. The witness service must **reject** illegal
-transitions, not merely record them. `DATA_STARTED` must be externally
-appended successfully before the first provider connection/census
-request/data operation. `SAMPLE_COMMITTED` must be externally appended and
-verified before `AUDIT_SAMPLE_COMMIT_BARRIER = PASS`.
+transitions, not merely record them. Every event must bind the exact
+authenticated namespace genesis values and exact immutable `EPISODE_BINDING`.
+`DATA_STARTED` must be externally appended successfully before the first
+provider connection/census request/data operation. `SAMPLE_COMMITTED` must be
+externally appended and verified before `AUDIT_SAMPLE_COMMIT_BARRIER = PASS`.
 
 ### G-ter. Partial-failure semantics
 
@@ -722,13 +840,19 @@ DIRECT_AUDIT_REQUEST_BLOCKED_BEFORE_SAMPLE_COMMIT = PASS
 POST_COMMIT_SAMPLE_MUTATION_FORBIDDEN = PASS
 FAILED_SELECTED_CASE_REPLACEMENT_FORBIDDEN = PASS
 EVALUATION_ORDER_FROZEN = PASS
+R1_AUTHORITATIVE_EXECUTION_ORDER = PASS
+R2_INTERVAL_AWARE_CLAIM_ONCE = PASS
+R3_PINNED_NAMESPACE_GENESIS = PASS
+R4_EPISODE_BINDING = PASS
+R5_WITNESS_BEFORE_LOCAL_MIRROR = PASS
+R6_STATE_MACHINE_BINDING = PASS
 STAGE1_GATES_UNCHANGED = PASS
 JSON_DIGEST_MATCH = PASS
 MARKDOWN_JSON_SEMANTIC_IDENTITY = PASS
 SINGLE_SHOT_EPISODE_FROZEN = PASS
 WINDOW_CLAIM_KEY_OUTCOME_INDEPENDENT = PASS
 WINDOW_CLAIM_KEY_CONSUMPTION_IRREVERSIBLE = PASS
-CLAIM_STRICTLY_PRECEDES_WINDOW_START = PASS
+CLAIM_STRICTLY_PRECEDES_CLAIM_ANCHOR_DEADLINE = PASS
 CLAIM_BOUNDARY_EQUALITY_REJECTED = PASS
 NO_DATA_DEPENDENT_ACTION_BEFORE_CLAIM_ANCHORED = PASS
 EXTERNAL_WITNESS_TRUST_BOUNDARY_SPECIFIED = PASS
@@ -751,6 +875,14 @@ OVERLAPPING_WINDOW_CLAIM_REJECTED = PASS
 WITNESS_IS_GLOBAL_CLAIM_AUTHORITY = PASS
 CLAIM_ANCHORED_AT_SERVER_ASSIGNED = PASS
 CLAIM_ANCHORED_AT_STRICTLY_BEFORE_DEADLINE = PASS
+CLAIM_ONCE_INTERVAL_AWARE = PASS
+CLAIM_ONCE_KEY_RECOMPUTED_BY_WITNESS = PASS
+CLAIM_ONCE_OVERLAP_CHECK_LINEARIZABLE = PASS
+LOCAL_CLAIM_IS_MIRROR_ONLY = PASS
+NAMESPACE_GENESIS_PERMANENT = PASS
+NAMESPACE_GENESIS_VALUES_BOUND_BEFORE_CLAIM = PASS
+EPISODE_BINDING_CONSTANT_ACROSS_EVENTS = PASS
+SEQUENCE_CONTIGUITY_AND_GENESIS_INCLUSIVE = PASS
 WITNESS_STATE_MACHINE_ILLEGAL_TRANSITIONS_REJECTED = PASS
 PARTIAL_FAILURE_SEMANTICS_FROZEN = PASS
 WRITER_EPHEMERAL_KEYPAIR_BOUND = PASS
@@ -769,41 +901,41 @@ suite must include (`mechanical_falsification_requirements` in the
 companion JSON); no new test file is in the authorized repair scope for
 this preregistration artifact, so they are frozen here declaratively:
 
-1. the frozen window literals remain unchanged — `WINDOW_START`/
-   `WINDOW_END`/`CENSUS_CLOSE` are not recomputed.
-2. an alternate timestamp encoding (fractional seconds, offset,
-   non-RFC3339) produces an invalid preimage, not an equivalent
-   `WINDOW_CLAIM_KEY`.
-3. a changed contract revision does not change `WINDOW_CLAIM_KEY` for the
-   same window, because contract revision is excluded from the preimage.
-4. a fresh local DB cannot reclaim an already-witnessed window.
-5. a duplicate witness `CLAIM_ONCE` for the same `WINDOW_CLAIM_KEY` is
+1. an authoritative execution array containing a dynamic-window resolver is
+   rejected; only the frozen R1 array is valid.
+2. `CLAIM_ANCHORED_AT` equal to or later than the deadline but earlier than
+   `WINDOW_START` is rejected.
+3. reaching `LIVE_EXECUTION_ELIGIBLE` without an explicit deadline gate is
    rejected.
-6. an overlapping-window claim (e.g. `window_start` shifted by one second)
-   is rejected under the namespace overlap rule.
-7. a caller-supplied or backdated `WITNESS_INCLUDED_AT` is rejected; only
-   server-assigned timestamps are valid.
-8. a witness `CLAIM_ONCE` success followed by a local crash still leaves
-   `WINDOW_CONSUMED = YES`, discoverable on witness query.
-9. an ambiguous submission followed by a retry that finds an existing
-   claim must not create a duplicate claim.
-10. writer B with a new ephemeral key cannot continue writer A's episode
-    after writer A fails.
-11. an event appended after a `TERMINAL_*` event is rejected by the
-    witness.
-12. a `DATA_STARTED` event that was never externally witnessed causes
-    qualification FAIL.
-13. an omitted failed witness event (dangling `CLAIM`/`DATA_STARTED` with
-    no terminal) is detected and rejected as incomplete lineage.
-14. a locally self-consistent but truncated lineage is detected by
-    independent witness enumeration.
-15. success-only presentation (omitting failed prior attempts) is rejected
-    by the final verifier.
-16. no V2 secrecy assertion (`CENSUS_PRECOMMIT_INFORMATION_FIREWALL`,
-    allowlist, opaque evidence store, precommit outcome leak) remains
-    anywhere in V4.
-17. a `FIRST_BUYER` or `DIRECT_CHAIN_AUDIT` request issued before a
-    witnessed `SAMPLE_COMMITTED` event is rejected by the barrier.
+4. a `CLAIM_ONCE` request carrying only a supplied window key is rejected;
+   the exact interval and all required identity fields are required.
+5. a supplied key differing from the witness's canonical interval
+   recomputation is rejected.
+6. an overlapping shifted interval is rejected under half-open interval
+   semantics.
+7. interval consumption without a discoverable `CLAIM`, or a `CLAIM`
+   acknowledgement without interval consumption, is rejected.
+8. final enumeration from a caller-selected later sequence is rejected; it
+   must begin from the pinned namespace genesis.
+9. final enumeration that begins after namespace genesis is rejected.
+10. a witness history with a sequence or event gap is rejected.
+11. a successor success presented without an earlier V4 failure is rejected
+    by complete permanent-namespace enumeration.
+12. changing `window_claim_key` after `CLAIM` is rejected.
+13. changing `episode_id` after `CLAIM` is rejected.
+14. changing `initial_claim_digest` after `CLAIM` is rejected.
+15. changing `writer_public_key` after `CLAIM` is rejected.
+16. writing the local claim mirror before witness `CLAIM_ONCE` is rejected.
+17. a fresh machine creating a new claim after witness success and a local
+    mirror crash is rejected.
+18. `DATA_STARTED` before witness verification is rejected.
+19. any R1–R6 semantic disagreement between Markdown and JSON is rejected.
+20. any active historical broad-review attack path is rejected.
+21. dynamic-window selection or recomputation is rejected.
+22. resurrection of the superseded V2 secrecy requirement is rejected.
+23. `FIRST_BUYER` or `DIRECT_CHAIN_AUDIT` before witnessed
+    `SAMPLE_COMMITTED` is rejected by the pre-result barrier.
+24. alternate H-02 sampling bytes or order are rejected.
 
 ## Phase result
 
