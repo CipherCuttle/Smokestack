@@ -1,0 +1,1392 @@
+{
+  "contract_id": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V4",
+  "phase": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V4",
+  "state": "PREREGISTERED_NOT_EXECUTED",
+  "lineage_kind": "NEW_PREREGISTRATION_LINEAGE",
+  "canonical_predecessor": "42bc8003b280affc8da0bb484ea9468da32bb656",
+  "historical_v3_source": {
+    "repair_commit": "7805046e6fac291d87fa8431f8f9166cb9f86284",
+    "status": "HISTORICAL_FAILED_V3_RULE_NONAUTHORITATIVE",
+    "remaining_critical": "C01_FIXED_WINDOW",
+    "disposition": "V4 carries forward the repaired C02-C12 architecture without redesign; V3 remains immutable"
+  },
+  "historical_failed_preregistrations": {
+    "v0": {
+      "final_commit": "bb8696bc74b660ec1ed34f404493bf05035a9b2a",
+      "terminal_verdict": "TERMINAL_FAIL_CLOSED"
+    },
+    "v1": {
+      "final_commit": "e23ffa8e18c0da2c71da9a7bc6e51d0aff77e6aa",
+      "terminal_verdict": "TERMINAL_FAIL_CLOSED"
+    },
+    "v2": {
+      "final_commit": "72175b91b39a2a093f12d13abf1e9d9d4f9f9b3f",
+      "terminal_verdict": "TERMINAL_FAIL_CLOSED",
+      "pr_number": 10,
+      "pr_state": "CLOSED",
+      "pr_merged": false
+    },
+    "immutability": "V0, V1, and V2 artifacts remain byte-for-byte unchanged; V4 is not a continuation, repair, or reopening of any of them"
+  },
+  "recorded_at": "2026-08-26",
+  "v4_design_decision": {
+    "does_not_attempt": "prove that outcome information is secret",
+    "frozen_claim": "OUTCOME_KNOWLEDGE_CANNOT_CHANGE_A_VALID_SAMPLE_OR_ERASE_AN_ATTEMPT",
+    "security_evidentiary_properties": [
+      "PROSPECTIVE_CLAIM",
+      "SINGLE_SHOT_WINDOW",
+      "OUTCOME_INDEPENDENT_SAMPLE",
+      "PRE_RESULT_SELECTED_LIST_COMMITMENT",
+      "NO_SAME_WINDOW_RETRY",
+      "NO_WRITER_HANDOFF",
+      "EXTERNALLY_WITNESSED_LINEAGE",
+      "FAIL_CLOSED_ABORT_CRASH",
+      "COMPLETE_FAILED_ATTEMPT_VISIBILITY"
+    ]
+  },
+  "feasibility_evidence_status": {
+    "classification": "NONCANONICAL_SUPPORTING_EVIDENCE",
+    "reason": "Canonical bootstrap scope for this preregistration phase authorizes only the two core V4 artifacts (this JSON and its companion Markdown). Scratch feasibility bytes are not copied into canonical Git; only their digests and provenance are recorded so the design record is auditable without expanding authorized scope.",
+    "phases": [
+      {
+        "phase_id": "PR01_BLIND_CENSUS_COMMIT_CAPSULE_FEASIBILITY_V0",
+        "terminal": "FEASIBILITY_FAIL",
+        "reason": "strict precommit transcript byte equality was falsified because membership-equivalent worlds with different unrelated chain volume produced different aggregate progress telemetry",
+        "disposition": "STRICT_NONINTERFERENCE is not carried forward",
+        "scratch_path": "/tmp/smokestack-blind-census-feasibility-v0",
+        "artifact_digests_sha256": {
+          "REPORT.md": "423cafae9dce5ad34890877afa46196bc7a2cff988edb928afe52cb6977c3b50",
+          "feasibility_v0.py": "715f6d7e4aec19e9f7175928ea910921ff0eddb4accc766abdaccb806ec9cd54"
+        }
+      },
+      {
+        "phase_id": "PR01_PRECOMMIT_OUTCOME_BLIND_CONTROL_FEASIBILITY_V0",
+        "terminal": "FEASIBILITY_FAIL",
+        "reason": "claim uniqueness was object-scoped rather than persistent window-scoped; lineage ledger was mutable and omission/truncation could not be detected",
+        "disposition": "the weak claim/ledger implementation is not reused",
+        "scratch_path": "/tmp/smokestack-precommit-control-feasibility-v0",
+        "artifact_digests_sha256": {
+          "VERDICT.md": "dcd07b55919a315cc7060c4a7e18ddbdaeb193ad57c2c1e5dcad00738cf2e03f",
+          "capsule.py": "0d47bc9f49bc8cb5c2f1640a8bb19305263741f47740619c8d5e6b4cafefc30e",
+          "test_capsule.py": "ee2ed6e4e18be68e430b5c17310afb823e80f8765319af110f3fb70a456b23da"
+        }
+      },
+      {
+        "phase_id": "PR01_PROSPECTIVE_CLAIM_AND_LINEAGE_FEASIBILITY_V0",
+        "terminal": "FEASIBILITY_PASS",
+        "test_suite": "51/51 PASS",
+        "independent_hostile_review": {
+          "critical": 0,
+          "high": 0
+        },
+        "established_in_bounded_offline_model": [
+          "WINDOW_CLAIM_KEY independent of episode_id and contract revision",
+          "SQLite transactional claim uniqueness",
+          "concurrent duplicate claim rejection",
+          "cross-object/cross-process/cross-restart rejection",
+          "changed contract cannot reuse consumed window",
+          "claim strictly precedes observation window",
+          "data blocked until witnessed claim",
+          "append-only hash-chained lineage",
+          "separate witness persistence/API model",
+          "truncation detected",
+          "rollback detected",
+          "failed-episode omission detected",
+          "success-only presentation detected",
+          "stale writer fencing modeled",
+          "strategic abort consumes window",
+          "successor uses a new non-overlapping window",
+          "final result binds prior lineage",
+          "deterministic sample is invariant to outcome material"
+        ],
+        "non_scored_dependencies": {
+          "D1": "production witness must be instantiated as an actually separate process/service and trust domain, not merely same-process API discipline; V4 resolves this in the external witness trust boundary section",
+          "D2": "fencing-authority-transfer policy was not designed; V4 resolves this by eliminating writer handoff"
+        },
+        "scratch_path": "/tmp/smokestack-pr01-claim-lineage-feasibility-v0",
+        "artifact_digests_sha256": {
+          "evidence/FEASIBILITY_REPORT.md": "4e418923652cf4754edfce8729735ceaf93455ec2af283eac5fc299d1f7969e1",
+          "evidence/HOSTILE_REVIEW.md": "82d7270ed79d109b6de985d14c04d606b7bf27de02722d566b597c70cf689317",
+          "evidence/test_results.json": "3af14b17073b11741de6a2043f5bc8d2b8aac003ca5169fe718cd8a085f9312c"
+        }
+      }
+    ],
+    "prohibition": "scratch conclusions are not copied into canonical Git and declared validated by that act alone; V4 independently freezes its own design and must pass its own review"
+  },
+  "stage_1_gates": {
+    "successful_parse_rate": {
+      "operator": ">=",
+      "threshold": 0.995
+    },
+    "schema_violations": {
+      "operator": "<=",
+      "threshold": 0.005
+    },
+    "market_legible_universe_coverage": {
+      "operator": ">=",
+      "threshold": 0.95
+    },
+    "p95_discovery_latency_seconds": {
+      "operator": "<=",
+      "threshold": 120
+    },
+    "first_buyer_availability": {
+      "operator": ">=",
+      "threshold": 0.95
+    },
+    "audited_first_buyer_identity_order_agreement": {
+      "operator": ">=",
+      "threshold": 0.99
+    },
+    "undocumented_semantic_shifts": {
+      "operator": "=",
+      "threshold": 0
+    },
+    "note": "identical to V0/V1/V2; not reopened by V4"
+  },
+  "single_shot_episode": {
+    "MAX_QUALIFICATION_EPISODES": 1,
+    "window_binding": "EXACT_FROZEN_LITERAL; this preregistration is the sole source of the window values; no selection or computation is permitted",
+    "WINDOW_START": "2026-09-07T00:00:00Z",
+    "WINDOW_END": "2026-09-14T00:00:00Z",
+    "WINDOW_INTERVAL": "[2026-09-07T00:00:00Z, 2026-09-14T00:00:00Z)",
+    "CENSUS_CLOSE": "2026-09-14T00:30:00Z",
+    "CLAIM_ANCHOR_DEADLINE": "2026-09-06T00:00:00Z",
+    "claim_anchor_deadline_rule": "the claim must be authoritatively anchored strictly before CLAIM_ANCHOR_DEADLINE; equality fails",
+    "deadline_miss_consequence": {
+      "condition": "V4 has not, before CLAIM_ANCHOR_DEADLINE: terminally closed PASS; bound the actual witness; completed execution authorization; completed witness CLAIM_ONCE; verified the witness receipt; and locally persisted the claim mirror",
+      "V4_LIVE_EPISODE_ELIGIBLE": false,
+      "MEASUREMENT_AUTHORIZED": false,
+      "terminal": "missing the deadline terminally blocks this V4 live episode"
+    },
+    "successor_rule": "a successor is a separate preregistration version; it does not move or alter this V4 window and must preserve the witnessed V4 lineage"
+  },
+  "window_claim_identity": {
+    "id": "WINDOW_CLAIM_KEY",
+    "PR01_WINDOW_NAMESPACE": "smokestack:pr01:source-qualification:solana-mainnet-beta",
+    "window_start_string": "2026-09-07T00:00:00Z",
+    "window_end_string": "2026-09-14T00:00:00Z",
+    "timestamp_representation": "exact ASCII/RFC3339 UTC string, format YYYY-MM-DDTHH:MM:SSZ only; no fractional seconds, no timezone offsets, no alternate equivalent encoding",
+    "exact_preimage_object": {
+      "namespace": "smokestack:pr01:source-qualification:solana-mainnet-beta",
+      "window_start": "2026-09-07T00:00:00Z",
+      "window_end": "2026-09-14T00:00:00Z"
+    },
+    "preimage_object_contract": "no missing, null, or extra members",
+    "formula": "window_claim_preimage = UTF8(RFC8785_JCS(exact_preimage_object)); WINDOW_CLAIM_KEY = lowercase_hex(SHA256(window_claim_preimage))",
+    "formula_is_authoritative": "this exact formula is authoritative; no 'equivalently exact byte contract' language applies",
+    "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
+    "encoding": "UTF-8",
+    "must_not_depend_on": [
+      "lineage_id",
+      "episode_id",
+      "version",
+      "contract_digest",
+      "process",
+      "PID",
+      "machine",
+      "writer",
+      "provider",
+      "operator"
+    ],
+    "consumption_is_permanent": "a consumed WINDOW_CLAIM_KEY can never become unconsumed",
+    "contract_change_does_not_authorize_reuse": true,
+    "overlap_rejection": "a witness operating under PR01_WINDOW_NAMESPACE must reject not only an exact duplicate WINDOW_CLAIM_KEY but any second qualification claim whose observation interval overlaps a previously consumed interval in that namespace; this blocks evasive successor windows such as 2026-09-07T00:00:01Z or 2026-09-06T23:59:59Z, both of which overlap the consumed V4 window"
+  },
+  "claim_order": {
+    "frozen": true,
+    "required_state_order": [
+      "V4_TERMINAL_PASS",
+      "execution authorization bound",
+      "exact fixed window verified",
+      "exact claim object constructed",
+      "WITNESS CLAIM_ONCE",
+      "witness durable inclusion established",
+      "witness receipt independently verified",
+      "local durable claim mirror written",
+      "CLAIM_ANCHORED_AT computed",
+      "claim deadline verified",
+      "CLAIM_ANCHORED = YES",
+      "DATA_START permitted"
+    ],
+    "forbidden_before_claim_anchored_yes": [
+      "provider connection",
+      "Solana RPC",
+      "secret read",
+      "paid request",
+      "LaserStream",
+      "census",
+      "data-dependent measurement"
+    ],
+    "boundary_equality_rule": "CLAIM_ANCHORED_AT == CLAIM_ANCHOR_DEADLINE is INVALID; CLAIM_ANCHORED_AT must be strictly less than CLAIM_ANCHOR_DEADLINE",
+    "crash_before_local_persistence": "if CLAIM_ONCE succeeds but the client crashes before local persistence, WINDOW_CONSUMED=YES; a later process queries the witness and sees the existing claim and must not create another claim",
+    "ambiguous_submission_result": "query the witness by WINDOW_CLAIM_KEY; if an existing claim exists, the window is consumed and no new claim may be created; if absence cannot be established because the witness is unavailable, FAIL CLOSED and no data starts; only if the authoritative witness proves no claim exists may the same pre-data submission attempt be retried",
+    "no_outcome_data_at_this_stage": "no outcome data exists or has been fetched at any point in this sequence"
+  },
+  "witness_claim_once": {
+    "resolves": "insufficiency of the prior local-claim-then-witness ordering",
+    "rule": "the external witness must provide an atomic CLAIM_ONCE operation keyed by (PR01_WINDOW_NAMESPACE, WINDOW_CLAIM_KEY); the witness itself is the cross-machine uniqueness authority",
+    "exactly_one_claim_once_may_succeed_per_window": true,
+    "bypass_forbidden_by": [
+      "fresh machine",
+      "fresh local DB",
+      "fresh episode_id",
+      "fresh contract revision",
+      "fresh writer"
+    ]
+  },
+  "external_witness_trust_boundary": {
+    "resolves_dependency": "D1",
+    "rule": "future live execution must not use an in-process-only witness; same-process SQLite is not a production-independent witness",
+    "minimum_requirements": [
+      "separate process/service trust domain",
+      "separate durable persistence",
+      "an atomic CLAIM_ONCE operation as the cross-machine uniqueness authority",
+      "append-only normal API",
+      "runtime qualification credentials have APPEND/READ/VERIFY only",
+      "runtime credentials have NO delete/rewrite/truncate operation",
+      "service returns a durable receipt/inclusion identifier",
+      "claim_digest is bound in the witnessed record",
+      "window_claim_key and writer_public_key are bound",
+      "a server-generated WITNESS_INCLUDED_AT is bound",
+      "witness receipt can later be independently verified",
+      "local database rollback/truncation is detectable by comparison with witness",
+      "successful final evidence cannot omit witnessed prior episodes"
+    ],
+    "production_provider_binding": {
+      "provider_identity": "TO_BE_BOUND_BEFORE_EXECUTION",
+      "gate_required_before_binding": "WITNESS_IMPLEMENTATION_BOUND = YES",
+      "gate_required_before_measurement": "tests of the actual configured witness must PASS before MEASUREMENT_AUTHORIZED = YES"
+    },
+    "claim_anchored_at_contract": {
+      "witness_included_at": {
+        "id": "WITNESS_INCLUDED_AT",
+        "generated_by": "external witness, server-side, at durable CLAIM_ONCE inclusion",
+        "caller_supplied": false,
+        "must_be_receipt_bound": "cryptographically/receipt-bound to the witnessed claim and part of the independently verifiable receipt",
+        "representation": "exact UTC RFC3339 representation per window_claim_identity.timestamp_representation"
+      },
+      "host_receipt_at": {
+        "id": "HOST_RECEIPT_AT",
+        "captured": "immediately after successful receipt verification, using the frozen V1 absolute-UTC-valid host clock contract (receipt_clock.absolute_utc_preflight)",
+        "requires": "the host clock has passed the carried-forward absolute UTC preflight"
+      },
+      "claim_anchored_at_formula": "CLAIM_ANCHORED_AT = max(WITNESS_INCLUDED_AT, HOST_RECEIPT_AT)",
+      "both_must_individually_parse_under_clock_contract": true,
+      "deadline_rule": "CLAIM_ANCHORED_AT < CLAIM_ANCHOR_DEADLINE (2026-09-06T00:00:00Z); equality fails",
+      "client_override_forbidden": "the client may not supply or override WITNESS_INCLUDED_AT",
+      "execution_ineligibility": "an actual witness implementation is execution-ineligible unless its receipt semantics prove the timestamp is server-assigned at durable inclusion"
+    }
+  },
+  "writer_handoff_and_fencing": {
+    "resolves_dependency": "D2",
+    "WRITER_HANDOFF_ALLOWED": false,
+    "SAME_WINDOW_RECOVERY_WRITER_ALLOWED": false,
+    "rule": "one episode has one writer authority, mechanically enforced by writer_identity_mechanism below, not merely by policy wording",
+    "writer_failure_triggers": [
+      "crash",
+      "loss of local claim lease/authority",
+      "kill",
+      "manual abort",
+      "staleness",
+      "cannot continue safely"
+    ],
+    "writer_failure_consequence": {
+      "EPISODE_STATE": "TERMINAL_FAIL_CLOSED",
+      "WINDOW_CONSUMED": true,
+      "second_writer_may_resume": false
+    },
+    "test": {
+      "scenario": "writer A starts; writer A fails; writer B attempts continuation with a new key",
+      "expected_result": "REJECT"
+    },
+    "transparent_failover_modeled": false
+  },
+  "writer_identity_mechanism": {
+    "id": "WRITER_EPHEMERAL_KEYPAIR",
+    "generation": "one ephemeral signing keypair generated at execution start, process-local",
+    "rules": [
+      "public key is bound into CLAIM_ONCE",
+      "every subsequent witness event for that episode must carry the same writer_public_key",
+      "every subsequent event must contain a valid signature made by the corresponding private key",
+      "witness rejects a changed writer_public_key",
+      "witness rejects unsigned/invalidly signed transitions",
+      "private key is process-ephemeral and MUST NOT be persisted to disk, database, evidence package, environment variable, secret store, or witness",
+      "no key-transfer/recovery protocol exists",
+      "transparent writer recovery is forbidden"
+    ],
+    "writer_death_consequence": "if the writer process dies and loses its private key, the same episode cannot produce further valid events; a new writer cannot substitute another key; the window is already consumed by CLAIM_ONCE",
+    "future_implementation_test_requirement": "future implementation tests must prove no supported restart/resume path can append a valid event using a different writer key",
+    "fencing_token_note": "if a fencing value remains, it is not an authority-transfer mechanism; fencing-authority-transfer policy (lease timing / quorum) remains explicitly undesigned and out of scope"
+  },
+  "abort_semantics": {
+    "EMERGENCY_ABORT_PERMITTED": true,
+    "abort_consequence": {
+      "state": "TERMINAL_ABORT",
+      "WINDOW_CONSUMED": true,
+      "terminal_receipt_required": true,
+      "witness_terminal_lineage_state_required": true,
+      "SOURCE_STACK_QUALIFIED": false
+    },
+    "retry_under_v4": false,
+    "reason": "MAX_QUALIFICATION_EPISODES = 1; an abort or execution-invalidating crash ends the V4 live qualification attempt",
+    "new_window_requires": "a NEW preregistration lineage/version, which must preserve V4 failure evidence and use a new non-overlapping window only",
+    "prevents": "optional stopping inside V4",
+    "successor_namespace_requirement": "any future PR01 qualification claim MUST use the same permanent PR01_WINDOW_NAMESPACE and PR01_LINEAGE_NAMESPACE; the final verifier must enumerate prior witnessed attempts so a future success cannot masquerade as the first attempt; the permanent namespaces are cross-version protocol constants"
+  },
+  "lineage": {
+    "PR01_LINEAGE_NAMESPACE": "smokestack:pr01:source-qualification:solana-mainnet-beta",
+    "canonical_event_classes": [
+      "CLAIM",
+      "CLAIM_ANCHORED",
+      "DATA_STARTED",
+      "CENSUS_CLOSED",
+      "SAMPLE_COMMITTED",
+      "TERMINAL_PASS",
+      "TERMINAL_FAIL",
+      "TERMINAL_ABORT"
+    ],
+    "all_events_must_be_externally_witnessed": true,
+    "event_binding": [
+      "namespace",
+      "witness_sequence",
+      "episode_id",
+      "window_claim_key",
+      "writer_public_key",
+      "event_type",
+      "payload_digest",
+      "previous_witness_event_digest",
+      "event_digest"
+    ],
+    "witness_interface_required_semantics": {
+      "operations": [
+        "CLAIM_ONCE(window_claim_key, ...)",
+        "APPEND_EVENT(...)",
+        "READ_EVENT(...)",
+        "LIST_NAMESPACE_FROM(sequence)",
+        "CURRENT_CHECKPOINT()",
+        "VERIFY_INCLUSION(...)",
+        "VERIFY_CONSISTENCY(...)"
+      ],
+      "or_equivalent_interface_with_identical_required_semantics": true,
+      "required_semantics": [
+        "globally monotone witness_sequence within PR01_LINEAGE_NAMESPACE",
+        "append-only",
+        "previously acknowledged events cannot disappear",
+        "independently queryable complete namespace history",
+        "signed/authenticated current checkpoint/head",
+        "inclusion verification for every returned event",
+        "consistency verification that a newer checkpoint extends an older checkpoint",
+        "runtime qualification credentials cannot delete/rewrite/truncate history"
+      ]
+    },
+    "final_verification_algorithm": [
+      "obtain current authenticated witness checkpoint",
+      "enumerate every PR01_LINEAGE_NAMESPACE event from the required genesis/prior canonical checkpoint through current checkpoint",
+      "verify all event inclusion",
+      "verify checkpoint consistency",
+      "reconstruct every claimed/started window",
+      "compare against local lineage",
+      "reject if any external event/window is absent locally",
+      "reject success-only selective presentation",
+      "reject dangling CLAIM/DATA_STARTED unless represented by a terminally invalid/unfinished lineage state",
+      "require current V4 event chain to be complete"
+    ],
+    "verification_note": "verification of one supplied receipt does not establish lineage completeness; the final qualification verifier must independently query the witness namespace and must not merely verify receipts supplied by the local process",
+    "final_pass_requires": {
+      "LOCAL_LINEAGE_VALID": true,
+      "WITNESS_LINEAGE_VALID": true,
+      "LOCAL_WITNESS_CONSISTENT": true,
+      "NO_WITNESSED_ATTEMPT_OMITTED": true
+    }
+  },
+  "witness_state_machine": {
+    "legal_transition_order": [
+      "CLAIM",
+      "CLAIM_ANCHORED",
+      "DATA_STARTED",
+      "CENSUS_CLOSED",
+      "SAMPLE_COMMITTED",
+      "TERMINAL_PASS"
+    ],
+    "alternative_terminal_paths": [
+      "CLAIM -> ...any valid prefix... -> TERMINAL_FAIL",
+      "CLAIM -> ...any valid prefix... -> TERMINAL_ABORT"
+    ],
+    "terminal_rule": "once TERMINAL_* occurs, no later event is valid; no second DATA_STARTED; no second SAMPLE_COMMITTED; no transition backward; no episode resurrection",
+    "enforcement": "the witness service must reject illegal transitions, not merely record them",
+    "data_started_ordering": "DATA_STARTED must be externally appended successfully before the first provider connection/census request/data operation",
+    "sample_committed_ordering": "SAMPLE_COMMITTED must be externally appended and verified before AUDIT_SAMPLE_COMMIT_BARRIER=PASS"
+  },
+  "partial_failure_semantics": {
+    "A_claim_once_rejected_before_durable_append": "no window consumed; no data allowed; retry of the same pre-data submission is permitted only after authoritative witness query proves absence",
+    "B_claim_once_appended_no_response": "window consumed; query/recovery may retrieve existing receipt; no new claim",
+    "C_claim_once_appended_local_mirror_fails": "window consumed; episode cannot silently disappear; external dangling CLAIM is visible; V4 cannot qualify unless lineage eventually ends in an allowed terminal state",
+    "D_claim_anchored_appended_process_crashes": "window consumed; no second writer; V4 qualification FAIL",
+    "E_data_started_appended_process_crashes": "window consumed; externally visible started attempt; V4 qualification FAIL",
+    "missing_terminal_receipt": "does not make the attempt disappear"
+  },
+  "universe": {
+    "note": "carried forward byte-identically from the validated V0/V1/V2 semantics; not reopened by V4",
+    "id": "SOLANA_UNIVERSE_CANDIDATE_V0",
+    "chain_id": "solana-mainnet-beta",
+    "asset_object": "fungible SPL Token or Token-2022 mint that is the non-quote side of a newly initialized Raydium CPMM pool",
+    "canonical_identity_key": [
+      "chain_id",
+      "mint_address"
+    ],
+    "names_symbols_are_identity": false,
+    "market_program": {
+      "name": "raydium-cp-swap",
+      "program_id": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+      "initialization_instructions": [
+        "Initialize",
+        "InitializeWithPermission"
+      ],
+      "decoder_source_commit": "raydium-io/raydium-cp-swap@244e1241f3c8d90eb93f176dfbc35f2605ec5a5c",
+      "initialization_discriminators": {
+        "Initialize": "afaf6d1f0d989bed",
+        "InitializeWithPermission": "3f37fe4131b25979"
+      }
+    },
+    "quote_mints": [
+      "So11111111111111111111111111111111111111112",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    ],
+    "token_programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+    ],
+    "observation_window": {
+      "duration": "7x24h",
+      "start": "2026-09-07T00:00:00Z",
+      "end": "2026-09-14T00:00:00Z",
+      "census_close": "2026-09-14T00:30:00Z",
+      "interval": "[2026-09-07T00:00:00Z, 2026-09-14T00:00:00Z)"
+    },
+    "membership_evidence": {
+      "purpose": "CENSUS_UNIVERSE_ELIGIBILITY_TRUTH only; it is not MARKET_STATE evidence",
+      "required_fields": [
+        "finalized successful initialization signature",
+        "finalized slot and full-block transaction index",
+        "outer and nested initialization instruction path",
+        "frozen CPMM program/discriminator match",
+        "canonical pool account identity",
+        "canonical mint pair identity",
+        "candidate mint is the single non-quote mint",
+        "positive initialization amounts"
+      ],
+      "not_required_fields": [
+        "market_state_request_success",
+        "market_state_response",
+        "market_state_raw_response_hash",
+        "market_state_field_validity"
+      ],
+      "failure_behavior": "a failure of the later MARKET_STATE operation never removes an otherwise qualifying census member"
+    },
+    "inclusion": [
+      "finalized successful Initialize or InitializeWithPermission invokes the frozen CPMM program",
+      "distinct sorted mint pair has exactly one fixed-set quote mint and one non-quote mint",
+      "init_amount_0 > 0 and init_amount_1 > 0",
+      "minimal membership evidence is complete",
+      "the first qualifying finalized CPMM initialization for the canonical mint identity is inside the window"
+    ],
+    "exclusion": [
+      "failed transaction",
+      "non-CPMM or non-initialization event",
+      "two quote mints, two non-quote mints, identical mints, or unsupported token owner",
+      "zero initialization amount",
+      "incomplete minimal membership evidence",
+      "an earlier qualifying initialization exists before window_start",
+      "unresolvable identity collision"
+    ],
+    "newly_active_history": {
+      "lower_boundary": "Solana genesis slot 0, inclusive",
+      "pre_window_exclusion": "any earlier qualifying initialization excludes the mint; later pools are duplicates",
+      "missing_history": "archive/pruning gap, unresolved page, null required membership primitive, or unavailable prior-history check yields NEWLY_ACTIVE_HISTORY_COMPLETE=NO and invalidates the packet",
+      "completeness": "all finalized frozen-program history through census_close must close at the genesis boundary before the denominator is valid"
+    },
+    "raydium_initialization_time_semantics": {
+      "INITIALIZE_OPEN_TIME_ARGUMENT": "u64 instruction argument decoded after the frozen discriminator",
+      "INITIALIZED_POOL_STATE_OPEN_TIME": "the program may store Clock unix_timestamp + 1 when the argument is not later than that clock; this stored field is not reconstructed by a later mutable-state read",
+      "INITIALIZATION_CLOCK_UNIX_TIMESTAMP": "the runtime Clock value used by the program, distinct from RPC blockTime",
+      "LATER_CURRENT_POOL_STATE": "never read for eligibility, newly-active classification, market legibility, or audit population",
+      "eligibility_rule": "membership uses the frozen initialization event and history rules; a required initialization primitive that cannot be reconstructed is UNAVAILABLE_OR_INVALID"
+    },
+    "timestamps": {
+      "source_event_at": "non-null finalized transaction blockTime",
+      "source_slot_or_block": "finalized slot plus transaction-array index",
+      "candidate_event_knowledge_at": "fetched_at of the first complete finalized census evidence for an event that may later qualify; it is not final membership and does not trigger MARKET_STATE",
+      "final_eligibility_confirmed_at": "the UTC knowledge timestamp recorded only after the complete census, genesis-inclusive prior-history proof, window closure, and outcome-independent membership ledger are sealed",
+      "market_state_fetched_at": "later host UTC retrieval timestamp for the independent event-addressed MARKET_STATE request; it is not source_event_at and carries no contemporaneous notification-latency claim",
+      "fetched_at": "provider observation/knowledge time, distinct from source_event_at; role-specific values are candidate_event_knowledge_at or market_state_fetched_at",
+      "recorded_at": "local evidence persistence time",
+      "decision_boundary": "final_eligibility_confirmed_at for final denominator membership; candidate_event_knowledge_at is retained only as provenance",
+      "rule": "later corrections append evidence and cannot rewrite a sealed timestamp or make a current snapshot historical"
+    },
+    "duplicates_aliases_migrations": {
+      "dedupe": "retain earliest by slot, transaction index, instruction path, and signature bytes; later pools are linked duplicates",
+      "aliases": "metadata aliases, symbols, names, logos, and provider IDs are ignored",
+      "migration": "a new mint address is a new asset",
+      "conflict": "AMBIGUOUS or UNAVAILABLE_OR_INVALID, never guessed"
+    },
+    "complete_chain_census": {
+      "enumeration_target": "getSignaturesForAddress(CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C) at finalized commitment",
+      "observation_range": "all finalized program history from slot 0 through the last finalized slot at census_close; membership is restricted to the window and prior-history exclusion uses genesis through window_start",
+      "pagination": "newest-to-oldest limit=1000 pages, each next page uses the prior last signature as before; until is not used to hide history",
+      "termination": "empty page after a strictly older cursor or genesis boundary; repeated cursor, non-decreasing slot, unexplained gap, or ceiling before closure fails completeness",
+      "finalized_evidence_mapping": "resolve every required signature and verify its containing block and transaction index; retain response hashes",
+      "prior_history_check": "group all decoded qualifying events by canonical mint and retain only earliest-in-window mints",
+      "completeness_accounting": "retain pages, cursors, signatures, slots, resolutions, candidate/exclusion/unavailable counts, gaps, retries, bytes, credits, and cost",
+      "fail_closed": "archive/pruning, null required primitive, provider gap, rate limit, timeout, malformed response, or unresolved account evidence makes CENSUS_COMPLETE=NO; it never shrinks the denominator",
+      "resource_ceiling": "a ceiling before termination proof yields PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO"
+    }
+  },
+  "census_secrecy_disposition": {
+    "note": "the V2 precommit information-firewall/secrecy layer (CENSUS_PRECOMMIT_INFORMATION_FIREWALL_V1, PRECOMMIT_OPAQUE_EVIDENCE_STORE, and related output allowlist/quarantine/parser-secrecy claims) is deleted in V4 and not replaced by an equivalent secrecy assertion",
+    "STRICT_PRECOMMIT_NONINTERFERENCE": "NOT_CLAIMED",
+    "CENSUS_OUTCOME_SECRECY": "NOT_REQUIRED",
+    "v4_defense": [
+      "exact prospective window",
+      "global claim-once before the window",
+      "deterministic membership->sample function",
+      "sample input excludes FIRST_BUYER / DIRECT_CHAIN_AUDIT results",
+      "one consumed attempt",
+      "externally complete lineage",
+      "no writer handoff",
+      "pre-result selected-list commitment"
+    ],
+    "visibility_note": "census/raw-chain information may be visible; visibility alone does not invalidate V4; it becomes invalid only if such information can influence a valid sample, permit window reuse, erase an attempt, redraw/replace cases, or bypass the commit barrier"
+  },
+  "v2_carryforward_disposition": {
+    "V2_H02_BYTE_EXACT_SAMPLING": "CARRIED_FORWARD",
+    "V2_H01_PRECOMMIT_SECRECY": "SUPERSEDED_NOT_CLAIMED"
+  },
+  "providers": [
+    {
+      "provider_id": "HELIUS_LASERSTREAM_GRPC_MAINNET_V0",
+      "role": "DISCOVERY",
+      "product_api_family": "Helius LaserStream gRPC transactionUpdate filtered to Raydium CPMM initialization",
+      "documentation_urls": [
+        "https://www.helius.dev/docs/laserstream/grpc",
+        "https://www.helius.dev/docs/billing/rate-limits",
+        "https://www.helius.dev/pricing",
+        "https://www.helius.dev/terms"
+      ],
+      "authentication": "Helius account/API credential required later; none is present or read now",
+      "temporal_semantics": "finalized raw transaction event; LIVE_FIRST_OBSERVATION is the first continuously connected observation, REPLAY_RECOVERY is never a successful latency observation, and provider-created timestamps are never host receipt time",
+      "receipt_clock_contract": "V1_RECEIPT_CLOCK_V1",
+      "schema_version": "Yellowstone/gRPC schema and deployed revision pinned before execution; current revision UNKNOWN_TO_BE_MEASURED",
+      "rate_limits_pricing": "plan limits and public paid reference are documented; exact filtered-stream delivery, credits, completeness, and cost are UNKNOWN_TO_BE_MEASURED",
+      "evidence_classification": {
+        "DOCUMENTED": [
+          "transaction monitoring",
+          "program filters",
+          "historical replay",
+          "plan limits"
+        ],
+        "INFERRED": [
+          "raw delivery can be decoded with the pinned Raydium decoder"
+        ],
+        "UNKNOWN_TO_BE_MEASURED": [
+          "completeness",
+          "latency",
+          "disconnect loss",
+          "replay overlap",
+          "schema revision"
+        ]
+      }
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_CENSUS_V1",
+      "role": "CENSUS_UNIVERSE_ELIGIBILITY",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC getSignaturesForAddress/getBlock/getTransaction for exhaustive minimal CPMM event census",
+      "documentation_urls": [
+        "https://solana.com/docs/rpc/http/getsignaturesforaddress",
+        "https://solana.com/docs/rpc/http/getblock",
+        "https://solana.com/docs/rpc/http/gettransaction",
+        "https://solana.com/docs/rpc/json-structures",
+        "https://www.quicknode.com/docs/solana/api-overview"
+      ],
+      "authentication": "separately controlled QuickNode endpoint/API key required later",
+      "temporal_semantics": "finalized slot, transaction-array index, instruction path, and immutable initialization event fields; no later current PoolState read",
+      "request_role_boundary": "this operation establishes only membership_evidence; it does not establish MARKET_STATE and is not counted as a MARKET_STATE success",
+      "rate_limits_pricing": "plan/RPS/archive and credit terms are documented at plan level; exact census availability and cost are UNKNOWN_TO_BE_MEASURED",
+      "evidence_classification": {
+        "DOCUMENTED": [
+          "finalized JSON-RPC methods and response fields",
+          "QuickNode Solana endpoint capability"
+        ],
+        "INFERRED": [
+          "pinned raw RPC plus Raydium decoder can establish minimal event identity"
+        ],
+        "UNKNOWN_TO_BE_MEASURED": [
+          "historical completeness",
+          "provider availability",
+          "archive behavior",
+          "cost"
+        ]
+      }
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_MARKET_STATE_V1",
+      "role": "MARKET_STATE",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC, a separately scheduled per-asset raw initialization-evidence operation using getTransaction/getBlock and required account/instruction evidence",
+      "documentation_urls": [
+        "https://solana.com/docs/rpc/http/getblock",
+        "https://solana.com/docs/rpc/http/gettransaction",
+        "https://solana.com/docs/rpc/json-structures",
+        "https://docs.raydium.io/products/cpmm",
+        "https://github.com/raydium-io/raydium-cp-swap/tree/244e1241f3c8d90eb93f176dfbc35f2605ec5a5c",
+        "https://www.quicknode.com/docs/solana/api-overview"
+      ],
+      "authentication": "QuickNode endpoint/API key required later; no credential is present or read now",
+      "pricing": "public QuickNode free/paid plan references; no spend is authorized and exact selected-operation credits/cost are UNKNOWN_TO_BE_MEASURED",
+      "terms_constraint": "QuickNode API-credit, account-use, and permitted raw-evidence-retention terms must be confirmed before execution",
+      "temporal_semantics": "the claim is the frozen initialization-time state at the immutable eligible event's finalized slot, not a current snapshot; retrieval may occur after final census closure because the event-addressed evidence is point-in-time valid",
+      "request_trigger": "one independent market-state request sequence per final eligible universe member, issued only after FINAL_ELIGIBILITY_CONFIRMED_AT and in canonical asset order; this is historical event-state retrieval, not a contemporaneous notification-latency claim",
+      "event_time_claim": "source_event_at is the immutable initialization event time; market_state_fetched_at is the later host retrieval time and never substitutes for source_event_at",
+      "fetched_at": "host UTC knowledge timestamp captured at request/response handling; represented as market_state_fetched_at and never substituted for source_event_at",
+      "exact_fields": {
+        "pool_account": "PoolState account bound by the initialization instruction",
+        "candidate_mint": "canonical non-quote mint and its frozen token-program identity",
+        "quote_mint": "one member of the fixed quote-mint set",
+        "vault_accounts": "both vault accounts bound by the initialization instruction",
+        "positive_initialization_amounts": "both decoded initialization amounts are strictly positive",
+        "initialize_open_time_argument": "the decoded u64 initialization argument",
+        "initial_status": "known zero-initialized PoolState status under the pinned Raydium source semantics",
+        "finalized_event_binding": "signature, slot, block transaction index, discriminator, instruction path, and non-null blockTime"
+      },
+      "validity": "AVAILABLE only when this operation independently receives and validates every required field, joins to the correct eligible identity and initialization boundary, and hashes the raw response; census success cannot substitute for it",
+      "response_statuses": [
+        "AVAILABLE",
+        "UNAVAILABLE",
+        "MALFORMED",
+        "TIMEOUT",
+        "UNSUPPORTED"
+      ],
+      "missing_behavior": "every non-AVAILABLE status remains attached to the eligible asset and remains in the coverage denominator",
+      "pagination": "no market pagination; at most eight bounded raw RPC calls per asset; no response is silently truncated",
+      "rate_limits": "QuickNode plan/RPS/archive/credit terms apply; exact operation availability and cost are UNKNOWN_TO_BE_MEASURED",
+      "schema_version": "standard Solana JSON-RPC response schema with encoding, commitment, maxSupportedTransactionVersion, pinned Raydium decoder commit, and harness parser identity bound before execution; deployed endpoint revision UNKNOWN_TO_BE_MEASURED",
+      "shared_backend": "shares QuickNode infrastructure with census and DIRECT_CHAIN_AUDIT; no provider independence claim is made for this role",
+      "prohibited": [
+        "later mutable PoolState snapshot",
+        "current price, volume, return, survival, attention, or outcome fields",
+        "reusing a census response or treating census completion as market-state success"
+      ],
+      "evidence_classification": {
+        "DOCUMENTED": [
+          "Solana finalized transaction/block response fields",
+          "QuickNode mainnet archive JSON-RPC capability",
+          "Raydium CPMM scope and instruction family"
+        ],
+        "INFERRED": [
+          "a separately scheduled raw request can reconstruct the frozen initialization-time field set"
+        ],
+        "UNKNOWN_TO_BE_MEASURED": [
+          "per-case availability",
+          "archive completeness",
+          "latency to request",
+          "schema drift",
+          "cost",
+          "terms for raw retention"
+        ]
+      }
+    },
+    {
+      "provider_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+      "role": "FIRST_BUYER",
+      "product_api_family": "Helius Enhanced Transactions legacy V1 history endpoint",
+      "documentation_urls": [
+        "https://www.helius.dev/docs/api-reference/enhanced-transactions/gettransactions",
+        "https://www.helius.dev/docs/billing/rate-limits",
+        "https://www.helius.dev/docs/billing/credits",
+        "https://www.helius.dev/pricing",
+        "https://www.helius.dev/terms"
+      ],
+      "authentication": "Helius API key required later; none is present or read now",
+      "pagination": "documented history pagination, maximum 20 pages per asset",
+      "ordering": "provider ordering is a claim only; direct chain order decides truth",
+      "semantics": "V0 first-buyer semantics carry forward unchanged: successful single-hop CPMM swap, positive net candidate-mint transfer to the recipient owner, routed/multi-hop and ambiguous cases unavailable",
+      "evidence_classification": {
+        "DOCUMENTED": [
+          "parsed swap/transfer history, pagination, V1/V2 distinction, rate limits"
+        ],
+        "INFERRED": [
+          "pool-address history can expose a candidate claim"
+        ],
+        "UNKNOWN_TO_BE_MEASURED": [
+          "availability, parser completeness, ordering fidelity, semantic drift"
+        ]
+      }
+    },
+    {
+      "provider_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+      "role": "DIRECT_CHAIN_AUDIT",
+      "product_api_family": "QuickNode Solana mainnet-beta JSON-RPC getSignaturesForAddress/getBlock/getTransaction and required account reads",
+      "documentation_urls": [
+        "https://solana.com/docs/rpc/http/getblock",
+        "https://solana.com/docs/rpc/http/gettransaction",
+        "https://solana.com/docs/rpc/json-structures",
+        "https://www.quicknode.com/docs/solana/api-overview",
+        "https://www.quicknode.com/pricing",
+        "https://www.quicknode.com/pt/terms"
+      ],
+      "authentication": "separate QuickNode endpoint/API key or account credential required later",
+      "ordering": "finalized slot, full getBlock transaction-array order, outer/CPI instruction path, and signature-byte duplicate tie-breaker",
+      "semantics": "raw chain-native derivation only; never Helius output, a cache, aggregator, wrapper, or provider first-buyer ordering",
+      "evidence_classification": {
+        "DOCUMENTED": [
+          "standard finalized JSON-RPC methods and fields, QuickNode Solana capability"
+        ],
+        "INFERRED": [
+          "raw JSON-RPC plus pinned Raydium decoder is an independent truth path"
+        ],
+        "UNKNOWN_TO_BE_MEASURED": [
+          "archive completeness, availability, method credits, endpoint revision"
+        ]
+      }
+    }
+  ],
+  "receipt_clock": {
+    "id": "V1_RECEIPT_CLOCK_V1",
+    "frozen": true,
+    "clock_domains": [
+      "CHAIN_EVENT_TIME",
+      "HOST_WALL_RECEIPT_UTC",
+      "HOST_MONOTONIC_RECEIPT",
+      "WALL_MONOTONIC_OFFSET"
+    ],
+    "start_binding": "at qualification process start capture wall_start_utc and mono_start_ns in one synchronous section, with no await or blocking work between the two reads",
+    "observation_binding": "for each LIVE_FIRST_OBSERVATION at callback entry capture wall_received_utc and mono_received_ns synchronously, without await; retain the raw pair and sampled offset",
+    "predicted_wall_received_utc": "wall_start_utc + (mono_received_ns - mono_start_ns)",
+    "clock_skew_tolerance": {
+      "value": 0.25,
+      "unit": "seconds",
+      "justification": "250 ms is below 0.21% of the 120-second latency gate and bounds receipt-clock error at a sub-second scale relevant to provider freshness"
+    },
+    "absolute_utc_preflight": {
+      "frozen": true,
+      "utc_time_source_identity": "HOST_TRUSTED_TIME_SYNCHRONIZATION_SERVICE_CHRONY",
+      "utc_sync_measurement_method": "Before qualification and at the frozen health-check cadence, read the active chrony tracking state and validated synchronized-source state. Record the signed local-wall-minus-trusted-UTC offset estimate and a conservative upper error bound that includes the synchronization service uncertainty, root dispersion, and half root delay; a normal/leap-valid synchronized state is required. This is a semantic contract, not a time request performed during preregistration.",
+      "absolute_utc_offset_estimate": "signed seconds: local host wall UTC estimate minus trusted UTC estimate at UTC_SYNC_OBSERVED_AT",
+      "absolute_utc_error_bound": "non-negative seconds: conservative upper bound on the absolute UTC error of the local wall clock at UTC_SYNC_OBSERVED_AT, including measurement uncertainty and synchronization dispersion/delay",
+      "utc_sync_observed_at": "host wall UTC timestamp captured with the synchronization measurement and paired with a monotonic sample",
+      "utc_sync_max_age": {
+        "value": 60,
+        "unit": "seconds",
+        "rule": "no receipt observation or checkpoint is valid unless the latest PASS measurement is at most 60 seconds old by monotonic time; a missed or stale health check fails closed"
+      },
+      "max_absolute_utc_error": {
+        "value": 0.25,
+        "unit": "seconds",
+        "rule": "at qualification start and every health check, abs(absolute_utc_offset_estimate) + absolute_utc_error_bound <= 0.25 seconds"
+      },
+      "start_and_continuation": "CLOCK_PREFLIGHT is PASS only when the start measurement passes and every 60-second maximum-age health check through finalization passes; no local wall-clock fallback is permitted",
+      "failure_behavior": "if trusted UTC state cannot be established, CLOCK_PREFLIGHT=FAIL, LATENCY_PACKET_VALID=NO, DISCOVERY_LATENCY_GATE=NOT_REPORTABLE_INVALID_CLOCK, and SOURCE_STACK_QUALIFIED=NO"
+    },
+    "validity_rules": [
+      "mono_received_ns >= mono_start_ns",
+      "abs(wall_received_utc - predicted_wall_received_utc) <= 0.25 seconds",
+      "source_event_at is non-null and discovery_latency_seconds = wall_received_utc - source_event_at is finite and >= 0",
+      "negative latency is INVALID_CLOCK and is never clamped or counted",
+      "a wall/monotonic offset discontinuity above 0.25 seconds makes the sequence-defined affected interval INVALID_CLOCK",
+      "a receipt observation is eligible for FINITE latency only when CLOCK_PREFLIGHT=PASS, its local wall/monotonic checks pass, and its sequence is not in any invalid checkpoint interval"
+    ],
+    "checkpoints": {
+      "cadence": "every 100 milliseconds by monotonic schedule",
+      "required_pairs": [
+        "start",
+        "each cadence checkpoint",
+        "before each receipt batch when batching exists",
+        "after each receipt batch when batching exists",
+        "final"
+      ],
+      "sample_identity": "every checkpoint and receipt sample has monotonic_ns and a process-local clock_sample_sequence; sequence starts at 1 and increments exactly once in the synchronous capture section, with no equal sequence values",
+      "capture_order": "the start checkpoint is sequence 1; each checkpoint or receipt sample obtains its sequence at capture before any later sample; receipt callback capture occurs before callback parsing or await; optional batch-boundary checkpoints are captured in the stated before/after order",
+      "first_checkpoint": "the first checkpoint has no predecessor and therefore creates no invalid interval; it establishes the initial offset",
+      "interval_rule": "for consecutive checkpoints C[i-1] and C[i], if abs(offset(C[i]) - offset(C[i-1])) > 0.25 seconds, mark exactly the sequence interval C[i-1].clock_sample_sequence < R.clock_sample_sequence <= C[i].clock_sample_sequence as INVALID_CLOCK for receipt observations R",
+      "equality_behavior": "the 0.25-second discontinuity comparison is strictly greater-than; a receipt at the lower boundary is excluded and a receipt at the upper boundary is included",
+      "final_checkpoint": "the final checkpoint is captured after the last receipt and final batch-boundary checkpoint; its comparison applies through its sequence and is not omitted",
+      "consecutive_and_overlapping_intervals": "each discontinuity creates its own closed-under-the-upper-bound sequence interval; the union of all such intervals is invalid, so consecutive or overlapping intervals remain invalid without special-case merging",
+      "transient_step_rule": "a step visible in any checkpoint comparison or a receipt's own wall/monotonic pair invalidates the mechanically specified sample; start/end-only recalibration is never sufficient, and an unobserved sub-cadence step cannot be inferred or promoted to a valid successful latency",
+      "implementation_determinism": "two faithful implementations supplied the same ordered checkpoint/receipt samples, source event times, tolerance, and UTC-health samples produce exactly the same classifications"
+    },
+    "latency_datum_contract": {
+      "one_per_eligible_asset": true,
+      "finite": {
+        "kind": "FINITE",
+        "ordering": "all FINITE values are ordered by seconds and every FINITE value is less than FAILURE_INFINITY"
+      },
+      "failure": {
+        "kind": "FAILURE_INFINITY",
+        "ordering": "greater than every FINITE value",
+        "reasons": [
+          "CASE_INVALID_CLOCK",
+          "NEGATIVE_LATENCY",
+          "NO_LIVE_OBSERVATION",
+          "REPLAY_ONLY",
+          "DUPLICATE_ONLY",
+          "LATE",
+          "TIMEOUT",
+          "UNAVAILABLE",
+          "MISSING_SOURCE_EVENT_AT",
+          "MALFORMED",
+          "UNSUPPORTED",
+          "PACKET_CLOCK_PREFLIGHT_INVALID"
+        ]
+      },
+      "packet_wide_failure": "PACKET_CLOCK_PREFLIGHT_INVALID assigns FAILURE_INFINITY to each eligible case for visibility but makes the packet LATENCY_PACKET_VALID=NO and DISCOVERY_LATENCY_GATE=NOT_REPORTABLE_INVALID_CLOCK",
+      "p95": "N is the count of all eligible universe members, not the count of FINITE datums; for N > 0 use sorted_latency[ceil(0.95*N)-1] over all N tagged datums; N=0 is NOT_REPORTABLE"
+    },
+    "latency_population": "every eligible universe member receives exactly one latency datum: {kind: FINITE, seconds: non-negative finite} only for a LIVE_FIRST_OBSERVATION with valid absolute UTC preflight, valid local receipt clock, and non-null finite source_event_at; otherwise {kind: FAILURE_INFINITY, reason: frozen failure classification}. Every FINITE value orders below FAILURE_INFINITY. Replay, duplicate, late, timeout, unavailable, malformed, unsupported, invalid-clock, and clock-preflight failures are never omitted"
+  },
+  "first_buyer_semantics": {
+    "frozen": true,
+    "qualifying_acquisition": "successful single-hop Raydium CPMM SwapBaseInput or SwapBaseOutput transferring positive net candidate-mint amount from pool vault to one recipient token-account owner and positive quote amount into the paired pool vault",
+    "success": "meta.err == null; missing explicit success is unavailable",
+    "wallet_identity": "owner of recipient SPL Token/Token-2022 account, not token-account address, fee payer, pool authority, program, mint authority, or fee account",
+    "excluded": [
+      "Initialize",
+      "Deposit",
+      "Withdraw",
+      "fee collection",
+      "mint",
+      "burn",
+      "direct transfer",
+      "airdrop",
+      "LP movement",
+      "self-transfer",
+      "Jupiter/Raydium routed or multi-hop transaction"
+    ],
+    "duplicates": "aggregate same-owner transfer rows within one qualifying swap; later acquisitions do not change first buyer",
+    "ambiguous": "multiple positive recipient owners, missing owner, missing required instruction path, or identity collision",
+    "unavailable": "provider/chain failure, missing field, failed transaction, unsupported parser, or ambiguity"
+  },
+  "chain_order": {
+    "frozen": true,
+    "order_key": [
+      "finalized_slot",
+      "getBlock_transaction_array_index",
+      "outer_instruction_index",
+      "inner_instruction_index",
+      "nested_instruction_path",
+      "signature_bytes_duplicate_tiebreaker"
+    ],
+    "ambiguous_or_missing": "UNAVAILABLE_OR_INVALID; never guessed"
+  },
+  "audit_population": {
+    "frozen": true,
+    "definition": "every distinct canonical asset in the closed complete universe snapshot with complete outcome-independent mint, pool, initial signature, slot, and vault identity fields",
+    "provider_absence_removes_case": false,
+    "forbidden_filters": [
+      "provider success/failure",
+      "parse result",
+      "first-buyer answer",
+      "chain agreement",
+      "price",
+      "volume",
+      "survival",
+      "attention"
+    ]
+  },
+  "audit_sampling": {
+    "note": "carried forward byte-identically from the validated V2 High-02 repair; not redesigned by V4",
+    "snapshot": "full final eligible universe ledger at census close 2026-09-14T00:30:00Z; include exactly the ordered array of complete outcome-independent asset objects with fields chain_id, mint_address, pool_address, initialization_signature, initialization_slot, block_transaction_index, candidate_vault, quote_vault, and source_event_at; freeze it only after CENSUS_COMPLETE=YES and FINAL_ELIGIBLE_UNIVERSE is sealed; serialize its UTF-8 JSON bytes with RFC8785/JSON Canonicalization Scheme (JCS) and commit SHA-256 before FIRST_BUYER_REQUEST_STARTED or DIRECT_CHAIN_AUDIT_REQUEST_STARTED and before any corresponding result retrieval or inspection",
+    "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
+    "snapshot_field_contract": {
+      "top_level": "bare JSON array; no wrapper object is permitted; N is the exact array length",
+      "member_object": "every array member is an object with exactly the nine listed members and no others; no member may be missing or null",
+      "fields": [
+        "chain_id",
+        "mint_address",
+        "pool_address",
+        "initialization_signature",
+        "initialization_slot",
+        "block_transaction_index",
+        "candidate_vault",
+        "quote_vault",
+        "source_event_at"
+      ],
+      "field_types": {
+        "chain_id": "JSON string; exact literal \"solana-mainnet-beta\"",
+        "mint_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "pool_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_signature": "JSON string; canonical Solana base58 signature encoding; decode exactly 64 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_slot": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "block_transaction_index": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "candidate_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "quote_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "source_event_at": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden; finalized transaction blockTime"
+      },
+      "array_order": "sort by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; locale comparison is forbidden",
+      "object_member_order": "RFC8785/JCS member ordering; application insertion order is not used",
+      "canonical_asset_identity": "exactly the JSON object {\"chain_id\": <exact chain_id>, \"mint_address\": <exact mint_address>} with no additional members",
+      "canonical_asset_identity_bytes": "UTF-8 bytes of the RFC8785/JCS serialization of that exact canonical_asset_identity object",
+      "same_identity_bytes_used_for": [
+        "canonical identity",
+        "snapshot array ordering",
+        "selector identity",
+        "selector tie-break identity"
+      ],
+      "forbidden_identity_encodings": [
+        "chain_id + \"|\" + mint_address",
+        "arbitrary application serialization",
+        "insertion-order JSON"
+      ],
+      "encoding": "UTF-8",
+      "universe_snapshot_bytes": "UTF-8(RFC8785_JCS(exact bare-array universe snapshot))",
+      "universe_digest": "lowercase_hex(SHA256(universe_snapshot_bytes)); exactly 64 lowercase hexadecimal characters",
+      "digest": "SHA-256 of universe_snapshot_bytes, computed before selected-list derivation and before any FIRST_BUYER or DIRECT_CHAIN_AUDIT request starts"
+    },
+    "sample_size": "min(200,N)",
+    "replacement": "without replacement; no discretionary replacement",
+    "seed": "smokestack:pr01:source-qualification:audit-v1",
+    "selector_preimage_bytes": "UTF8(\"smokestack:pr01:source-qualification:audit-v1\") || UTF8(\"|\") || UTF8(universe_digest) || UTF8(\"|\") || canonical_asset_identity_bytes",
+    "selector": "selector_score = SHA256(selector_preimage_bytes); compare raw 32-byte SHA-256 values in ascending unsigned lexicographic byte order; equal scores are ordered by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; select the first min(200,N) without replacement",
+    "selected_list_commitment": "build the selected-list commitment object with the exact frozen schema, RFC8785/JCS-canonicalize its UTF-8 bytes, compute SHA-256 as audit_selected_list_digest, and durably seal the object and digest before any FIRST_BUYER_REQUEST_STARTED or DIRECT_CHAIN_AUDIT_REQUEST_STARTED request or any corresponding result retrieval/inspection",
+    "unavailable_selected_case": "retained in the committed sample and denominator; failed selected cases cannot be replaced, redrawn, or shrunk",
+    "outcome_bearing_information_never_a_selector_input": true
+  },
+  "audit_sample_commit_barrier": {
+    "id": "AUDIT_SAMPLE_COMMIT_BARRIER_V4",
+    "frozen": true,
+    "note": "identical order/schema semantics to AUDIT_SAMPLE_COMMIT_BARRIER_V2, plus binding to WINDOW_CLAIM_KEY and witnessed SAMPLE_COMMITTED lineage event",
+    "purpose": "The exact deterministic direct-chain audit selected list is canonicalized, hashed, and durably committed and witnessed before any FIRST_BUYER or DIRECT_CHAIN_AUDIT request can start and before any corresponding result can be retrieved or inspected.",
+    "secrecy_disclaimer": "this barrier governs result ordering/control, not census information secrecy; see census_secrecy_disposition",
+    "required_state_order": [
+      "COMPLETE CENSUS",
+      "prove CENSUS_COMPLETE = YES",
+      "freeze FINAL ELIGIBLE UNIVERSE",
+      "build exact audit universe snapshot",
+      "RFC8785/JCS canonicalize",
+      "SHA-256 universe_digest",
+      "deterministically derive sample size min(200,N)",
+      "deterministically derive exact ordered selected list",
+      "build selected-list commitment object",
+      "RFC8785/JCS canonicalize selected-list object",
+      "SHA-256 audit_selected_list_digest",
+      "DURABLY SEAL COMMITMENT",
+      "witness SAMPLE_COMMITTED digest",
+      "verify witness receipt",
+      "prove AUDIT_SAMPLE_COMMIT_BARRIER = PASS"
+    ],
+    "complete_census_precondition": "No snapshot, universe_digest, sample size, selected list, commitment object, or barrier result is valid unless CENSUS_COMPLETE=YES is proven and FINAL_ELIGIBLE_UNIVERSE is frozen from the complete outcome-independent census.",
+    "final_eligible_universe": "The frozen complete census membership ledger is the sole source of the audit universe. Later provider success/failure, parse status, first-buyer claims, chain-audit results, agreement, price, volume, survival, attention, or other outcomes cannot add, remove, or alter a member before commitment.",
+    "audit_universe_snapshot": {
+      "top_level": "bare JSON array; no wrapper object is permitted; N is the exact array length",
+      "member_object": "every array member is an object with exactly the nine listed members and no others; no member may be missing or null",
+      "exact_fields": [
+        "chain_id",
+        "mint_address",
+        "pool_address",
+        "initialization_signature",
+        "initialization_slot",
+        "block_transaction_index",
+        "candidate_vault",
+        "quote_vault",
+        "source_event_at"
+      ],
+      "canonical_asset_identity": "exactly the JSON object {\"chain_id\": <exact chain_id>, \"mint_address\": <exact mint_address>} with no additional members",
+      "canonical_asset_identity_bytes": "UTF-8 bytes of the RFC8785/JCS serialization of that exact canonical_asset_identity object",
+      "array_order": "sort by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; locale comparison is forbidden",
+      "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
+      "encoding": "UTF-8",
+      "universe_snapshot_bytes": "UTF-8(RFC8785_JCS(exact bare-array universe snapshot))",
+      "universe_digest": "lowercase_hex(SHA256(universe_snapshot_bytes)); exactly 64 lowercase hexadecimal characters",
+      "derived_before": [
+        "FIRST_BUYER_REQUEST_STARTED",
+        "FIRST_BUYER result retrieval/inspection",
+        "DIRECT_CHAIN_AUDIT_REQUEST_STARTED",
+        "direct-chain result retrieval/inspection"
+      ]
+    },
+    "sample_derivation": {
+      "sample_size": "min(200,N)",
+      "seed": "smokestack:pr01:source-qualification:audit-v1",
+      "selector_preimage_bytes": "UTF8(\"smokestack:pr01:source-qualification:audit-v1\") || UTF8(\"|\") || UTF8(universe_digest) || UTF8(\"|\") || canonical_asset_identity_bytes",
+      "selector": "selector_score = SHA256(selector_preimage_bytes); compare raw 32-byte SHA-256 values in ascending unsigned lexicographic byte order; equal scores are ordered by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; select the first min(200,N) without replacement",
+      "selected_list": "the exact ordered array of selected canonical asset identities, with length sample_size and no duplicate identity",
+      "order_frozen": true
+    },
+    "commitment_object_schema": {
+      "object_type": "AUDIT_SELECTED_LIST_COMMITMENT",
+      "schema_version": "AUDIT_SELECTED_LIST_COMMITMENT_V4",
+      "required_members": [
+        "contract_id",
+        "canonical_predecessor",
+        "window_claim_key",
+        "universe_digest",
+        "sample_size",
+        "selector_seed",
+        "selected_asset_identities"
+      ],
+      "member_contract": {
+        "contract_id": "string; must equal PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V4",
+        "canonical_predecessor": "string; must equal 42bc8003b280affc8da0bb484ea9468da32bb656",
+        "window_claim_key": "JSON string; exactly the 64 lowercase hexadecimal WINDOW_CLAIM_KEY bound at CLAIM time for this episode's window",
+        "universe_digest": "JSON string; exactly the 64 lowercase hexadecimal SHA-256 digest of the canonical audit universe snapshot",
+        "sample_size": "JSON integer; must equal min(200,N)",
+        "selector_seed": "JSON string; must equal smokestack:pr01:source-qualification:audit-v1",
+        "selected_asset_identities": "JSON array of exactly sample_size unique canonical identity objects in the frozen selector score order"
+      },
+      "field_types": {
+        "contract_id": "JSON string",
+        "canonical_predecessor": "JSON string",
+        "window_claim_key": "JSON string",
+        "universe_digest": "JSON string",
+        "sample_size": "JSON integer; no quotes, null, boolean, float, or exponent alternative",
+        "selector_seed": "JSON string",
+        "selected_asset_identities": "JSON array; each member is exactly {chain_id, mint_address} with no extra members, no nulls, and no duplicates"
+      },
+      "no_extra_members": true,
+      "selected_list_is_not_a_replacement_pool": true
+    },
+    "selected_list_canonicalization": {
+      "method": "RFC8785 / JSON Canonicalization Scheme (JCS)",
+      "encoding": "UTF-8",
+      "input": "the complete selected-list commitment object with exactly the required members and no extra members",
+      "digest": "audit_selected_list_digest = lowercase_hex(SHA256(exact RFC8785/JCS UTF-8 commitment-object bytes)); exactly 64 lowercase hexadecimal characters",
+      "digest_is_bound_to": [
+        "canonical_predecessor",
+        "window_claim_key",
+        "universe_digest",
+        "sample_size",
+        "selector_seed",
+        "exact ordered selected_asset_identities"
+      ]
+    },
+    "durable_seal": {
+      "required": true,
+      "operation": "durably persist the exact canonical commitment-object bytes, audit_selected_list_digest, and seal metadata as one append-only qualification evidence record before emitting barrier PASS",
+      "seal_metadata": [
+        "commitment_object_digest",
+        "sealed_at",
+        "seal_identity",
+        "canonical_predecessor",
+        "window_claim_key"
+      ],
+      "read_back": "barrier PASS requires exact durable read-back byte equality and digest equality for the sealed commitment object; a missing, partial, changed, or unreadable seal is FAIL",
+      "no_request_before_seal": true
+    },
+    "witness_requirement": {
+      "event_type": "SAMPLE_COMMITTED",
+      "must_be_externally_witnessed": true,
+      "witness_receipt_verification_required_before_pass": true
+    },
+    "barrier_pass_predicate": "AUDIT_SAMPLE_COMMIT_BARRIER = PASS if and only if the complete census proof, frozen final universe, canonical universe snapshot, universe_digest, sample_size, ordered selected list, exact-schema commitment object, JCS bytes, audit_selected_list_digest, durable seal, exact read-back, and verified SAMPLE_COMMITTED witness receipt all pass; otherwise PASS is forbidden",
+    "request_and_result_gate": {
+      "first_buyer_request_started": "permitted only after AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+      "first_buyer_result_retrieval_or_inspection": "permitted only after AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+      "direct_chain_audit_request_started": "permitted only after AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+      "direct_chain_result_retrieval_or_inspection": "permitted only after AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+      "blocked_before_commit": true
+    },
+    "hard_invariants": {
+      "AUDIT_SAMPLE_COMMITTED_PRE_RESULT": "YES",
+      "FIRST_BUYER_REQUEST_BLOCKED_BEFORE_SAMPLE_COMMIT": "YES",
+      "DIRECT_AUDIT_REQUEST_BLOCKED_BEFORE_SAMPLE_COMMIT": "YES",
+      "AUDIT_SAMPLE_MUTABLE_AFTER_COMMIT": "NO",
+      "FAILED_SELECTED_CASE_REPLACEMENT_FORBIDDEN": "YES"
+    },
+    "post_commit_invalidation": {
+      "trigger": "later evidence invalidates the committed underlying universe or shows the committed snapshot was not the complete eligible universe",
+      "packet_valid": "NO",
+      "source_stack_qualified": "NO",
+      "sample_action": "do not recompute, replace, redraw, or shrink the audit sample within the same qualification episode",
+      "selected_case_action": "retain every committed selected case and its failure/invalidity lineage"
+    }
+  },
+  "denominators": {
+    "logical_case_rule": "one stable scheduled case ID; retries are attempts and duplicates do not add rows",
+    "market_state": {
+      "numerator": "count of eligible universe members with status AVAILABLE and every exact market-state field valid from the independent market-state operation",
+      "denominator": "all eligible universe members in the closed complete census",
+      "formula": "market_legible_universe_coverage = valid_MARKET_STATE_observations / eligible_universe_members",
+      "statuses": "UNAVAILABLE, MALFORMED, TIMEOUT, UNSUPPORTED, late, invalid, and request failure remain in denominator and are not numerator",
+      "zero": "zero denominator is NOT_REPORTABLE and cannot pass"
+    },
+    "parse": {
+      "numerator": "complete valid expected schema and mandatory fields",
+      "denominator": "all scheduled logical cases for the role",
+      "failure": "invalid, malformed, timeout, unavailable, late, and unsupported fail parse; retries do not change denominator"
+    },
+    "schema": {
+      "numerator": "logical case with a non-duplicate payload violating frozen schema/mandatory fields",
+      "denominator": "all scheduled logical cases for the role",
+      "failure": "timeout without payload is parse failure but not schema violation; duplicate conflict is schema evidence"
+    },
+    "discovery_latency": {
+      "datum": "exactly one tagged datum per eligible universe member: {kind: FINITE, seconds: non-negative finite} or {kind: FAILURE_INFINITY, reason: frozen failure classification}; every FINITE value orders below FAILURE_INFINITY",
+      "numerator": "count of FINITE datums, for descriptive reporting only",
+      "denominator": "N = count(all eligible universe members in the closed complete census)",
+      "failure": "invalid-clock, replay, duplicate, late, missing source_event_at, timeout, unavailable, malformed, unsupported, and clock-preflight failure become FAILURE_INFINITY; packet-wide absolute-clock failure is NOT_REPORTABLE_INVALID_CLOCK, never omission",
+      "p95": "if N > 0, sort all N tagged datums by total order and use sorted_latency[ceil(0.95*N)-1]; if N = 0, NOT_REPORTABLE and cannot pass; failures cannot improve the order statistic"
+    },
+    "first_buyer_availability": {
+      "numerator": "unambiguous first-buyer answer satisfying frozen semantics",
+      "denominator": "every audit-eligible asset",
+      "failure": "all unavailable, malformed, ambiguous, provider-failure, and chain-audit-failure states remain denominator"
+    },
+    "audit_agreement": {
+      "numerator": "selected Helius identity and order exactly match QuickNode-derived chain truth",
+      "denominator": "every committed selected case",
+      "failure": "unavailable, malformed, ambiguous, provider-failure, chain-audit-failure, and disagreement are not success; no replacement"
+    },
+    "zero_population": "all zero denominators are NOT_REPORTABLE and cannot pass"
+  },
+  "source_role_independence": {
+    "first_buyer_source_id": "HELIUS_ENHANCED_TRANSACTIONS_V1",
+    "direct_chain_audit_source_id": "QUICKNODE_SOLANA_MAINNET_RPC_DIRECT_AUDIT_V0",
+    "market_state_source_id": "QUICKNODE_SOLANA_MAINNET_RPC_MARKET_STATE_V1",
+    "ids_must_differ": true,
+    "audit_rule": "direct audit uses only separately controlled QuickNode raw chain evidence and pinned Raydium interpretation; never Helius output or a derived/re-exported first-buyer dataset",
+    "shared_backend_rule": "census, market-state, and direct audit may share QuickNode infrastructure; this is disclosed and no independence is claimed for market-state"
+  },
+  "execution_shape": {
+    "evaluation_order": [
+      "v4_closed_pass",
+      "resolve_exact_future_window",
+      "build_exact_claim_object",
+      "durable_local_claim_transaction",
+      "external_witness_submission_and_receipt_verification",
+      "claim_anchored_yes_and_strictly_before_window_start",
+      "live_execution_eligible",
+      "live_discovery_and_receipt_clock_capture_during_window",
+      "complete_chain_census_snapshot_and_final_eligibility_closure",
+      "freeze_final_eligible_universe_and_build_exact_audit_universe_snapshot",
+      "rfc8785_jcs_canonicalize_universe_snapshot_and_sha256_universe_digest",
+      "deterministically_derive_sample_size_and_exact_ordered_selected_list",
+      "build_exact_schema_selected_list_commitment_object_and_jcs_sha256_audit_selected_list_digest",
+      "durably_seal_audit_selected_list_commitment_and_read_back_exact_bytes",
+      "witness_sample_committed_and_verify_receipt",
+      "prove_audit_sample_commit_barrier",
+      "per-asset_market_state_request_after_final_eligibility_in_canonical_identity_order",
+      "first_buyer",
+      "direct_chain_audit_sample",
+      "gate_calculation",
+      "witness_terminal_lineage_event"
+    ],
+    "request_ceilings": {
+      "laserstream_connections": 1,
+      "laserstream_reconnects": 10,
+      "laserstream_replay_minutes_per_reconnect": 15,
+      "helius_history_pages_per_asset": 20,
+      "market_state_raw_rpc_calls_per_asset": 8,
+      "quicknode_signature_pages": 50000,
+      "quicknode_raw_rpc_calls_total": 100000
+    },
+    "quicknode_role_budgets": {
+      "accounting_unit": "every QuickNode JSON-RPC request attempt, including retries, consumes one charged raw RPC call; no role may borrow or transfer unused calls",
+      "QUICKNODE_CENSUS_CALL_BUDGET": 50000,
+      "QUICKNODE_MARKET_STATE_CALL_BUDGET": 40000,
+      "QUICKNODE_AUDIT_CALL_BUDGET": 10000,
+      "QUICKNODE_GLOBAL_CALL_CEILING": 100000,
+      "census": {
+        "ceiling": 50000,
+        "order": "newest-to-oldest signature-page cursor order, then required block/transaction resolution order",
+        "retry_charging": "initial request and each retry are charged",
+        "exhaustion": "before termination/completeness proof: CENSUS_COMPLETE=NO, PACKET_VALID=NO, SOURCE_STACK_QUALIFIED=NO; never shrink the census"
+      },
+      "market_state": {
+        "ceiling": 40000,
+        "order": "final eligible universe members sorted by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order",
+        "max_request_calls_per_asset": 8,
+        "max_charged_attempts_per_asset": 24,
+        "retry_charging": "each initial request and up to two retry attempts is charged; the 24-call worst case is reserved before execution",
+        "preflight_fit": "after final eligibility closure, require N * 24 <= 40000 before issuing any selective MARKET_STATE request; otherwise PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO before execution",
+        "exhaustion": "any unexpected exhaustion or incomplete all-member execution yields PACKET_VALID=NO; no sampling, borrowing, or denominator shrinkage"
+      },
+      "audit": {
+        "ceiling": 10000,
+        "order": "the already committed selected-list order, then each case's frozen chain-order request sequence",
+        "max_charged_attempts_per_case": 50,
+        "retry_charging": "each initial request and retry attempt is charged",
+        "preflight_fit": "require sample_size * 50 <= 10000 before executing the committed sample; otherwise PACKET_VALID=NO without changing the sample",
+        "exhaustion": "any exhaustion before every committed selected case is adjudicated yields PACKET_VALID=NO; no replacement or sample shrinkage"
+      },
+      "global_ceiling": "100000 = 50000 + 40000 + 10000"
+    },
+    "market_state_trigger_ceiling": "one independent sequence per final eligible asset, issued only after FINAL_ELIGIBILITY_CONFIRMED_AT in canonical identity order; at most eight request calls and at most 24 charged attempts including two retries per retryable request; no 30-second contemporaneous trigger applies",
+    "retry_count": 2,
+    "retryable": [
+      "408",
+      "429",
+      "5xx",
+      "transport"
+    ],
+    "non_retryable": [
+      "400",
+      "401",
+      "403",
+      "404",
+      "schema_error"
+    ],
+    "timeouts_seconds": {
+      "stream_operation": 30,
+      "http_request": 10
+    },
+    "concurrency": {
+      "stream": 1,
+      "helius_history": 4,
+      "quicknode": 8
+    },
+    "raw_evidence": "retain permitted request/response bytes or immutable reference, SHA-256, source identity, schema/parser identity, timestamps, attempts, result classification, and cost for at least 24 months",
+    "parser_identity": "later harness commit, Node/npm, contract digest, schema revisions, and parser version bound before first request; post-request change creates a new packet",
+    "cost_accounting": "record plan, fixed fee, credits, requests, retries, bytes, overages, and invoice/usage evidence per source",
+    "failure_preservation": "never delete, hide, or denominator-edit failed, late, duplicate, unavailable, invalid, or selected cases"
+  },
+  "closure_assertions": {
+    "V0_FILES_UNCHANGED": "PASS",
+    "V1_FILES_UNCHANGED": "PASS",
+    "V2_FILES_UNCHANGED": "PASS",
+    "NEW_PREREGISTRATION_LINEAGE_NOT_A_REPAIR": "PASS",
+    "H01_ABSOLUTE_UTC_PREFLIGHT_FROZEN": "PASS",
+    "H01_STALE_UTC_SYNC_FAIL_CLOSED": "PASS",
+    "H02_ONE_LATENCY_DATUM_PER_ELIGIBLE_ASSET": "PASS",
+    "H02_P95_DENOMINATOR_EQUALS_ELIGIBLE_UNIVERSE": "PASS",
+    "H02_FAILURES_CANNOT_IMPROVE_P95": "PASS",
+    "H03_CLOCK_INTERVAL_BOUNDARIES_FROZEN": "PASS",
+    "H03_CLOCK_CLASSIFICATION_DETERMINISTIC": "PASS",
+    "H04_MARKET_STATE_TRIGGER_EVENT_FROZEN": "PASS",
+    "H04_MARKET_STATE_EXECUTION_ORDER_UNIQUE": "PASS",
+    "H04_MARKET_STATE_TEMPORAL_FEASIBILITY": "PASS",
+    "H05_ROLE_SPECIFIC_QUICKNODE_BUDGETS": "PASS",
+    "H05_SCHEDULER_ORDER_CANNOT_SELECT_CASES": "PASS",
+    "H05_RESOURCE_EXHAUSTION_FAIL_CLOSED": "PASS",
+    "H06_RFC8785_JCS_RESTORED": "PASS",
+    "H06_UNIVERSE_DIGEST_REPRODUCIBLE": "PASS",
+    "H06_AUDIT_SAMPLE_REPRODUCIBLE": "PASS",
+    "CARRIED_FORWARD_VALIDATED_SEMANTICS": "PASS",
+    "ZERO_DENOMINATOR_FAIL_CLOSED": "PASS",
+    "STAGE1_GATE_IDENTITY": "PASS",
+    "EXECUTION_RESOURCE_CLOSURE": "PASS",
+    "MARKET_STATE_NON_TAUTOLOGICAL": "PASS",
+    "MARKET_STATE_SUBSTANTIVE_OBSERVATION": "PASS",
+    "AUTHORIZATION_FAIL_CLOSED": "PASS",
+    "MEASUREMENT_AUTHORIZED": "NO",
+    "SOURCE_STACK_QUALIFIED": "NO",
+    "PR02_STARTED": "NO",
+    "CENSUS_COMPLETE_BEFORE_SAMPLE_COMMIT": "PASS",
+    "STRICT_PRECOMMIT_NONINTERFERENCE": "NOT_CLAIMED",
+    "CENSUS_OUTCOME_SECRECY": "NOT_REQUIRED",
+    "V2_H01_PRECOMMIT_SECRECY": "SUPERSEDED_NOT_CLAIMED",
+    "V2_H02_BYTE_EXACT_SAMPLING": "CARRIED_FORWARD",
+    "RFC8785_JCS_UNIVERSE_SNAPSHOT": "PASS",
+    "AUDIT_SAMPLE_DERIVED_FROM_PRE_RESULT_UNIVERSE_ONLY": "PASS",
+    "AUDIT_SELECTED_LIST_SCHEMA_FROZEN": "PASS",
+    "AUDIT_SELECTED_LIST_JCS_FROZEN": "PASS",
+    "AUDIT_SELECTED_LIST_DIGEST_FROZEN": "PASS",
+    "AUDIT_SELECTED_LIST_ORDER_FROZEN": "PASS",
+    "AUDIT_SAMPLE_COMMITTED_PRE_RESULT": "PASS",
+    "FIRST_BUYER_REQUEST_BLOCKED_BEFORE_SAMPLE_COMMIT": "PASS",
+    "DIRECT_AUDIT_REQUEST_BLOCKED_BEFORE_SAMPLE_COMMIT": "PASS",
+    "POST_COMMIT_SAMPLE_MUTATION_FORBIDDEN": "PASS",
+    "FAILED_SELECTED_CASE_REPLACEMENT_FORBIDDEN": "PASS",
+    "EVALUATION_ORDER_FROZEN": "PASS",
+    "STAGE1_GATES_UNCHANGED": "PASS",
+    "JSON_DIGEST_MATCH": "PASS",
+    "MARKDOWN_JSON_SEMANTIC_IDENTITY": "PASS",
+    "V1_RECEIPT_CLOCK_NEGATIVE_REJECTED": "PASS",
+    "V1_RECEIPT_CLOCK_SKEW_RULE_FROZEN": "PASS",
+    "V1_RECEIPT_CLOCK_TRANSIENT_STEP_DETECTION": "PASS",
+    "V1_MARKET_STATE_NON_TAUTOLOGICAL": "PASS",
+    "V1_MARKET_STATE_SUBSTANTIVE_OBSERVATION": "PASS",
+    "V1_MARKET_STATE_DENOMINATOR_INDEPENDENT_OF_SUCCESS": "PASS",
+    "V1_MARKET_STATE_TEMPORAL_CONTRACT": "PASS",
+    "V1_MARKET_STATE_FAILURE_REMAINS_IN_DENOMINATOR": "PASS",
+    "V1_STAGE1_GATES_UNCHANGED": "PASS",
+    "SINGLE_SHOT_EPISODE_FROZEN": "PASS",
+    "WINDOW_CLAIM_KEY_OUTCOME_INDEPENDENT": "PASS",
+    "WINDOW_CLAIM_KEY_CONSUMPTION_IRREVERSIBLE": "PASS",
+    "CLAIM_STRICTLY_PRECEDES_WINDOW_START": "PASS",
+    "CLAIM_BOUNDARY_EQUALITY_REJECTED": "PASS",
+    "NO_DATA_DEPENDENT_ACTION_BEFORE_CLAIM_ANCHORED": "PASS",
+    "EXTERNAL_WITNESS_TRUST_BOUNDARY_SPECIFIED": "PASS",
+    "EXTERNAL_WITNESS_APPEND_ONLY_CREDENTIAL_SCOPE": "PASS",
+    "WITNESS_IMPLEMENTATION_BINDING_GATED": "PASS",
+    "WRITER_HANDOFF_ELIMINATED": "PASS",
+    "SAME_WINDOW_RECOVERY_WRITER_REJECTED": "PASS",
+    "ABORT_IS_TERMINAL_AND_CONSUMES_WINDOW": "PASS",
+    "NO_RETRY_UNDER_V4": "PASS",
+    "LINEAGE_EVENT_CLASSES_FROZEN": "PASS",
+    "LINEAGE_HASH_CHAIN_BOUND": "PASS",
+    "CRITICAL_EVENTS_EXTERNALLY_WITNESSED": "PASS",
+    "ALL_LINEAGE_EVENTS_EXTERNALLY_WITNESSED": "PASS",
+    "FEASIBILITY_EVIDENCE_CLASSIFIED_NONCANONICAL": "PASS",
+    "FEASIBILITY_EVIDENCE_NOT_SELF_VALIDATING": "PASS",
+    "WINDOW_FROZEN_NOT_DISCRETIONARY": "PASS",
+    "WINDOW_NAMESPACE_GLOBAL_NOT_LINEAGE_SCOPED": "PASS",
+    "WINDOW_CLAIM_KEY_GLOBAL_NAMESPACE_SCOPED": "PASS",
+    "OVERLAPPING_WINDOW_CLAIM_REJECTED": "PASS",
+    "WITNESS_IS_GLOBAL_CLAIM_AUTHORITY": "PASS",
+    "CLAIM_ANCHORED_AT_SERVER_ASSIGNED": "PASS",
+    "CLAIM_ANCHORED_AT_STRICTLY_BEFORE_DEADLINE": "PASS",
+    "WITNESS_STATE_MACHINE_ILLEGAL_TRANSITIONS_REJECTED": "PASS",
+    "PARTIAL_FAILURE_SEMANTICS_FROZEN": "PASS",
+    "WRITER_EPHEMERAL_KEYPAIR_BOUND": "PASS",
+    "WRITER_KEY_SUBSTITUTION_REJECTED": "PASS",
+    "SUCCESSOR_NAMESPACE_ENUMERATION_REQUIRED": "PASS"
+  },
+  "mechanical_falsification_requirements": {
+    "note": "these are the required falsification checks a future implementation test suite must include; no new test file is in the authorized repair scope for this preregistration artifact, so they are frozen here declaratively",
+    "checks": [
+      "the frozen window literals remain unchanged: WINDOW_START/WINDOW_END/CENSUS_CLOSE are not recomputed",
+      "an alternate timestamp encoding (fractional seconds, offset, non-RFC3339) produces an invalid preimage, not an equivalent WINDOW_CLAIM_KEY",
+      "a changed contract revision does not change WINDOW_CLAIM_KEY for the same window, because contract revision is excluded from the preimage",
+      "a fresh local DB cannot reclaim an already-witnessed window",
+      "a duplicate witness CLAIM_ONCE for the same WINDOW_CLAIM_KEY is rejected",
+      "an overlapping-window claim (e.g. window_start shifted by one second) is rejected under the namespace overlap rule",
+      "a caller-supplied or backdated WITNESS_INCLUDED_AT is rejected; only server-assigned timestamps are valid",
+      "a witness CLAIM_ONCE success followed by a local crash still leaves WINDOW_CONSUMED=YES, discoverable on witness query",
+      "an ambiguous submission followed by a retry that finds an existing claim must not create a duplicate claim",
+      "writer B with a new ephemeral key cannot continue writer A's episode after writer A fails",
+      "an event appended after a TERMINAL_* event is rejected by the witness",
+      "a DATA_STARTED event that was never externally witnessed causes qualification FAIL",
+      "an omitted failed witness event (dangling CLAIM/DATA_STARTED with no terminal) is detected and rejected as incomplete lineage",
+      "a locally self-consistent but truncated lineage is detected by independent witness enumeration",
+      "success-only presentation (omitting failed prior attempts) is rejected by the final verifier",
+      "no V2 secrecy assertion (CENSUS_PRECOMMIT_INFORMATION_FIREWALL, allowlist, opaque evidence store, precommit outcome leak) remains anywhere in V4",
+      "a FIRST_BUYER or DIRECT_CHAIN_AUDIT request issued before a witnessed SAMPLE_COMMITTED event is rejected by the barrier"
+    ]
+  },
+  "authorization": {
+    "measurement_authorized": false,
+    "live_provider_execution_authorized": false,
+    "paid_provider_spend_authorized": false,
+    "secret_read_authorized": false,
+    "solana_rpc_execution_authorized": false,
+    "database_started": false,
+    "detector_started": false,
+    "pr02_started": false,
+    "necessary_but_not_sufficient": "a successful V4 preregistration closure is necessary but not sufficient for live execution",
+    "separate_execution_authorization_must_bind": [
+      "exact V4 candidate digest",
+    "exact frozen V4 observation window",
+      "actual external witness implementation/service identity",
+      "witness health/permission test",
+      "local durable claim store identity",
+      "provider credentials identities without exposing secrets",
+      "provider spend ceilings",
+      "host/toolchain identity",
+      "one-shot episode authority"
+    ]
+  },
+  "exit": {
+    "allowed_state": "PREREGISTERED_NOT_EXECUTED",
+    "source_stack_qualified": false,
+    "census_complete_required_for_valid_packet": true,
+    "next_gate": "PR01_PREREG_V4_INDEPENDENT_BROAD_HOSTILE_REVIEW",
+    "pr02": "NOT_STARTED"
+  },
+  "non_execution_attestation": {
+    "live_provider_execution": false,
+    "source_measurement_run": false,
+    "secret_read": false,
+    "solana_rpc_call": false,
+    "paid_provider_spend": false,
+    "source_stack_qualified": false
+  }
+}
