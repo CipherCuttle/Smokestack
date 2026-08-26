@@ -13,7 +13,7 @@
 - `PR02 = NOT_STARTED`
 - Historical semantic source only: `e23ffa8e18c0da2c71da9a7bc6e51d0aff77e6aa`
 - Exact JSON: [`experiments/qualification/pr01-source-qualification-prereg-v2.json`](../experiments/qualification/pr01-source-qualification-prereg-v2.json)
-- JSON SHA-256: `18d53fcc0c6818ca90658aebaa532231e8ed56414480900466810370a2af4c44`
+- JSON SHA-256: `5afaa0998909948fe8bd5c9c083fca224b9517990176ac5cb2dc85b12e1ba140`
 
 This is a new immutable V2 preregistration. V0 remains terminally failed and is
 not edited, reopened, repaired, or re-reviewed. V2 carries forward the exact
@@ -55,6 +55,60 @@ required finalized signature/block/transaction primitive, checks prior history,
 and fails closed on gaps, pruning, null required primitives, malformed data,
 timeouts, rate limits, or resource ceilings before closure. No absence is
 treated as exclusion or as a smaller denominator.
+
+### Precommit census information firewall
+
+`CENSUS_PRECOMMIT_INFORMATION_FIREWALL` is frozen at the census process
+boundary. Before `AUDIT_SAMPLE_COMMIT_BARRIER = PASS`, the census role may
+expose outside its isolated census parser only the exact outcome-independent
+membership primitives required for universe construction; census
+completeness/accounting metadata; request identity; response SHA-256; response
+byte length; and the timing, cost, and retry metadata required by the census
+contract. It must not expose swap identities or ordering, token-transfer
+recipients or owners, candidate-acquisition identities, balance changes not
+required for initialization membership, first-buyer candidates,
+post-initialization transaction semantics, direct-audit answers, or provider
+and audit outcome fields.
+
+Raw QuickNode census response bodies may transit the census transport because
+completeness requires chain evidence, but they are quarantined in a
+`PRECOMMIT_OPAQUE_EVIDENCE_STORE`. Before the barrier they are not
+operator-visible, selector-visible, available to `FIRST_BUYER` or
+`DIRECT_CHAIN_AUDIT`, emitted to stdout/stderr, logs, dashboards, reports,
+exception messages, or intermediate readable tables, or persisted as
+plaintext-readable non-allowlisted evidence. The future execution harness
+must retain the raw evidence through a write-only or public-key/envelope
+mechanism whose decryption/read capability is unavailable to the precommit
+qualification process, selector, operator-facing surfaces, `FIRST_BUYER`, and
+`DIRECT_CHAIN_AUDIT` until `AUDIT_SAMPLE_COMMIT_BARRIER = PASS`. This freezes
+the information-flow properties without selecting a vendor dependency.
+Precommit-visible evidence is limited to content hash, byte length, source
+identity, request identity, and allowed accounting metadata.
+
+Outcome information may physically transit the isolated census transport and
+parser as part of a raw chain response, but before the barrier it must not be
+observable, queryable, or decision-relevant outside that isolated boundary.
+
+The isolated precommit census parser may decode only CPMM initialization
+identity, finalized success, slot, block transaction index, instruction path,
+discriminator, pool identity, mint identities, vault identities,
+initialization amounts, `source_event_at`, and history/completeness
+predicates. For a `getBlock` response, unrelated transactions remain opaque to
+all precommit-visible outputs. A non-initialization CPMM transaction found
+while enumerating program history may be classified as
+`NON_INITIALIZATION` for completeness accounting only; swap recipient, order,
+and acquisition semantics must not be decoded or output.
+
+`CENSUS_PRECOMMIT_VIEW` is the sole census input to
+`FINAL_ELIGIBLE_UNIVERSE` construction, audit-universe snapshot construction,
+`universe_digest`, and selected-list derivation. The selector receives no raw
+provider response, and no operator discretion based on quarantined evidence is
+permitted. If any first-buyer- or direct-audit-relevant outcome information
+from census raw responses becomes visible outside the isolated allowlisted
+boundary before the barrier, set `PRECOMMIT_OUTCOME_LEAK = YES`,
+`PACKET_VALID = NO`, and `SOURCE_STACK_QUALIFIED = NO`, stop the same
+qualification episode, and forbid sample commitment, redraw, recomputation,
+selective discard, or sanitize-and-continue behavior.
 
 ### Deliberate separation of census truth and market-state observation
 
@@ -302,42 +356,80 @@ COMPLETE CENSUS
 No step can be skipped, reordered, or satisfied by provider output. The
 snapshot is built only from the complete outcome-independent census after
 CENSUS_COMPLETE = YES has been proven and FINAL_ELIGIBLE_UNIVERSE has been
-frozen. The universe snapshot uses the exact V1 field contract and
-RFC8785 / JSON Canonicalization Scheme (JCS) UTF-8 bytes. Its universe_digest
-is SHA-256 over those bytes.
+frozen. The exact audit universe snapshot is a bare JSON array, not a wrapper
+object; N is its exact array length. Every member is an object with exactly
+these members and no others: chain_id, mint_address, pool_address,
+initialization_signature, initialization_slot, block_transaction_index,
+candidate_vault, quote_vault, and source_event_at. No member may be missing or
+null.
+
+The snapshot JSON types are frozen: chain_id is the exact JSON string
+"solana-mainnet-beta"; each of mint_address, pool_address, candidate_vault,
+and quote_vault is a JSON string whose canonical Solana base58 decoding is
+exactly 32 bytes and whose canonical re-encoding equals the original string
+byte-for-byte; initialization_signature is a JSON string whose canonical
+Solana base58 decoding is exactly 64 bytes and whose canonical re-encoding
+equals the original string; and initialization_slot, block_transaction_index,
+and source_event_at are non-negative JSON integers that are
+Number.isSafeInteger / RFC8785-compatible. Booleans, floats, exponent
+alternatives, strings, and null are forbidden for those integer fields.
+source_event_at continues to mean the finalized transaction blockTime.
+
+Sort the snapshot array by canonical_asset_identity_bytes in ascending unsigned
+bytewise lexical order; locale comparison is forbidden. The
+canonical_asset_identity is exactly the two-member object
+{"chain_id": <exact chain_id>, "mint_address": <exact mint_address>} with
+no additional members. canonical_asset_identity_bytes is the UTF-8 byte
+sequence of the RFC8785/JCS serialization of that exact object. These same
+bytes are used for canonical identity, snapshot ordering, selector identity,
+and selector tie-breaking; chain_id + "|" + mint_address, insertion-order
+JSON, and arbitrary application serialization are forbidden.
+
+universe_snapshot_bytes is the UTF-8 encoding of the RFC8785/JCS
+serialization of the exact bare array. universe_digest is the lowercase
+hexadecimal SHA-256 of those bytes and is exactly 64 lowercase hexadecimal
+characters.
 
 The sample size is exactly min(200,N). The carried-forward seed is
 smokestack:pr01:source-qualification:audit-v1. For each canonical asset
-identity, the selector is:
+identity, the exact selector preimage is:
 
 ~~~text
-SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity)
+selector_preimage_bytes =
+  UTF8("smokestack:pr01:source-qualification:audit-v1")
+  || UTF8("|")
+  || UTF8(universe_digest)
+  || UTF8("|")
+  || canonical_asset_identity_bytes
+
+selector_score = SHA256(selector_preimage_bytes)
 ~~~
 
-The concatenation is UTF-8 encoded. Unsigned hexadecimal scores are sorted
-ascending; equal scores are ordered by canonical asset identity in ascending
-bytewise UTF-8 order. The first min(200,N) identities form the exact ordered
-selected list, without replacement. The selected list has no discretionary
-replacement, redraw, or shrinkage rule.
+Compare selector scores as raw 32-byte SHA-256 values in ascending unsigned
+lexicographic byte order. Equal scores are tie-broken with the same
+canonical_asset_identity_bytes in ascending unsigned bytewise lexical order.
+Select the first min(200,N) identities without replacement. The exact ordered
+selected_asset_identities value is a JSON array of the canonical identity
+objects, with no strings, alternate identity representations, extra members,
+nulls, or duplicates.
 
-The selected-list commitment object is frozen to exactly these members:
-
-~~~json
-{
-  "contract_id": "PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V2",
-  "canonical_predecessor": "42bc8003b280affc8da0bb484ea9468da32bb656",
-  "universe_digest": "<64 lowercase hexadecimal SHA-256 digest>",
-  "sample_size": "<integer equal to min(200,N)>",
-  "selector_seed": "smokestack:pr01:source-qualification:audit-v1",
-  "selected_asset_identities": "<exact ordered array of unique {chain_id,mint_address} objects>"
-}
-~~~
+The selected-list commitment object is exactly the six-member object defined
+by the authoritative machine-readable
+audit_sample_commit_barrier.commitment_object_schema path: its JSON members
+are contract_id (string equal to
+PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V2), canonical_predecessor (string
+equal to 42bc8003b280affc8da0bb484ea9468da32bb656), universe_digest (the exact
+64-character lowercase digest string), sample_size (the JSON integer
+min(200,N)), selector_seed (the exact seed string), and
+selected_asset_identities (the exact ordered JSON array of unique canonical
+identity objects). No member is missing, null, or extra.
 
 The commitment object has no extra members. It is RFC8785/JCS
-canonicalized as UTF-8, and audit_selected_list_digest is SHA-256 of those
-canonical bytes. The digest binds the canonical predecessor, universe digest,
-sample size, carried-forward selector seed, and exact ordered selected
-identities.
+canonicalized as UTF-8. `audit_selected_list_digest` is the lowercase
+hexadecimal SHA-256 of the exact canonical UTF-8 commitment-object bytes and is
+exactly 64 lowercase hexadecimal characters. The digest binds the canonical
+predecessor, universe digest, sample size, carried-forward selector seed, and
+exact ordered selected identities.
 
 DURABLY SEAL COMMITMENT means durably persisting the exact canonical
 commitment-object bytes, digest, and seal metadata as one append-only
@@ -379,23 +471,24 @@ frozen signature-byte duplicate tie-breaker; ambiguous order is never guessed.
 
 The audit population is every distinct canonical asset in the closed complete
 universe snapshot under outcome-independent criteria. Provider absence cannot
-remove a case. The snapshot contains exactly the ordered complete asset
-objects with fields `chain_id`, `mint_address`, `pool_address`,
-`initialization_signature`, `initialization_slot`,
-`block_transaction_index`, `candidate_vault`, `quote_vault`, and
-`source_event_at`, ordered by `(chain_id, mint_address)` in ascending bytewise
-UTF-8 order. Its UTF-8 bytes are serialized with `RFC8785 / JSON
-Canonicalization Scheme (JCS)` and hashed as `universe_digest` before
-selected-list derivation or any first-buyer/direct-chain-audit request or
-result retrieval/inspection. The carried-forward V1 seed and selector are:
+remove a case. The snapshot is the exact bare array and exact nine-member
+object/type contract in Section 5, sorted by the same
+canonical_asset_identity_bytes. Its UTF-8 bytes are RFC8785/JCS bytes and are
+hashed as universe_digest before selected-list derivation or any
+first-buyer/direct-chain-audit request or result retrieval/inspection. The
+carried-forward V1 seed and selector are the exact byte construction in
+Section 5; no pipe-joined identity string is permitted:
 
 ```text
-seed = smokestack:pr01:source-qualification:audit-v1
-score = SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity)
+selector_preimage_bytes = UTF8("smokestack:pr01:source-qualification:audit-v1")
+  || UTF8("|") || UTF8(universe_digest) || UTF8("|")
+  || canonical_asset_identity_bytes
+selector_score = SHA256(selector_preimage_bytes)
 ```
 
-Scores are sorted as unsigned hexadecimal bytes, with equal scores ordered by
-canonical asset identity in ascending bytewise UTF-8 order. The first
+Scores are sorted as raw 32-byte values in ascending unsigned lexicographic
+byte order, with equal scores ordered by the same canonical identity bytes.
+The first
 `min(200,N)` identities are selected without replacement. The exact ordered
 selected identity list is bound into the frozen selected-list commitment
 object, JCS-canonicalized, SHA-256 hashed as `audit_selected_list_digest`, and
@@ -487,6 +580,12 @@ V1_MARKET_STATE_FAILURE_REMAINS_IN_DENOMINATOR = PASS
 V1_STAGE1_GATES_UNCHANGED = PASS
 AUTHORIZATION_FAIL_CLOSED = PASS
 CENSUS_COMPLETE_BEFORE_SAMPLE_COMMIT = PASS
+CENSUS_PRECOMMIT_INFORMATION_FIREWALL = PASS
+CENSUS_SELECTION_VIEW_ALLOWLIST_FROZEN = PASS
+CENSUS_RAW_RESPONSE_PRECOMMIT_OPAQUE = PASS
+FIRST_BUYER_OUTCOME_VISIBLE_PRECOMMIT = NO
+DIRECT_AUDIT_OUTCOME_VISIBLE_PRECOMMIT = NO
+PRECOMMIT_OUTCOME_LEAK_FAIL_CLOSED = PASS
 RFC8785_JCS_UNIVERSE_SNAPSHOT = PASS
 AUDIT_SAMPLE_DERIVED_FROM_PRE_RESULT_UNIVERSE_ONLY = PASS
 AUDIT_SELECTED_LIST_SCHEMA_FROZEN = PASS

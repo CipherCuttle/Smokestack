@@ -148,7 +148,119 @@
       "prior_history_check": "group all decoded qualifying events by canonical mint and retain only earliest-in-window mints",
       "completeness_accounting": "retain pages, cursors, signatures, slots, resolutions, candidate/exclusion/unavailable counts, gaps, retries, bytes, credits, and cost",
       "fail_closed": "archive/pruning, null required primitive, provider gap, rate limit, timeout, malformed response, or unresolved account evidence makes CENSUS_COMPLETE=NO; it never shrinks the denominator",
-      "resource_ceiling": "a ceiling before termination proof yields PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO"
+      "resource_ceiling": "a ceiling before termination proof yields PACKET_VALID=NO and SOURCE_STACK_QUALIFIED=NO",
+      "precommit_information_firewall": {
+        "id": "CENSUS_PRECOMMIT_INFORMATION_FIREWALL_V1",
+        "frozen": true,
+        "until": "AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+        "precommit_census_output_allowlist": [
+          "exact outcome-independent membership primitives required for universe construction: CPMM initialization identity, finalized success, slot, block transaction index, instruction path, discriminator, pool identity, mint identities, vault identities, initialization amounts, source_event_at, and history/completeness predicates",
+          "census completeness/accounting metadata",
+          "request identity",
+          "response SHA-256",
+          "response byte length",
+          "timing/cost/retry metadata required by the census contract"
+        ],
+        "precommit_census_output_forbidden": [
+          "swap identities",
+          "swap ordering",
+          "token transfer recipients/owners",
+          "candidate acquisition identities",
+          "balance changes not required for initialization membership",
+          "first-buyer candidates",
+          "post-initialization transaction semantics",
+          "direct-audit answers",
+          "provider outcome fields",
+          "audit outcome fields"
+        ],
+        "raw_response_quarantine": {
+          "transport_may_receive_raw_bytes": true,
+          "raw_response_body_operator_visible_precommit": false,
+          "raw_response_body_selector_visible_precommit": false,
+          "raw_response_body_first_buyer_visible_precommit": false,
+          "raw_response_body_direct_chain_audit_visible_precommit": false,
+          "raw_response_body_available_to_selector_precommit": false,
+          "raw_response_body_available_to_first_buyer_logic_precommit": false,
+          "raw_response_body_available_to_direct_chain_audit_logic_precommit": false,
+          "raw_response_body_emitted_to_stdout_stderr_precommit": false,
+          "raw_response_body_emitted_to_debug_output_precommit": false,
+          "raw_response_body_emitted_to_logs_dashboards_reports_precommit": false,
+          "raw_response_body_emitted_to_error_paths_precommit": false,
+          "raw_response_body_emitted_to_exception_messages_or_readable_tables_precommit": false,
+          "non_allowlisted_content_exposed_by_logging_debug_error_paths_precommit": false,
+          "non_allowlisted_fields_persisted_in_plaintext_readable_evidence_precommit": false,
+          "opaque_evidence_store": {
+            "id": "PRECOMMIT_OPAQUE_EVIDENCE_STORE",
+            "raw_evidence_retained": true,
+            "mechanism": "write-only or public-key/envelope mechanism; no vendor dependency is prescribed",
+            "precommit_decryption_or_read_capability": false,
+            "decryption_or_read_unavailable_to": [
+              "precommit qualification process",
+              "selector",
+              "operator-facing surfaces",
+              "FIRST_BUYER role",
+              "DIRECT_CHAIN_AUDIT role"
+            ],
+            "capability_becomes_available": "only after AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+            "precommit_visible_evidence": [
+              "content_sha256",
+              "byte_length",
+              "source_identity",
+              "request_identity",
+              "allowed completeness/accounting metadata",
+              "allowed timing/cost/retry metadata"
+            ],
+            "future_harness_retains_raw_evidence": true
+          },
+          "outcome_information_may_physically_transit_isolated_transport_parser": true,
+          "outcome_information_observable_queryable_or_decision_relevant_outside_boundary_precommit": false
+        },
+        "census_parser_boundary": {
+          "isolated_parser_only": true,
+          "allowed_decoded_fields": [
+            "CPMM initialization identity",
+            "finalized success",
+            "slot",
+            "block transaction index",
+            "instruction path",
+            "discriminator",
+            "pool identity",
+            "mint identities",
+            "vault identities",
+            "initialization amounts",
+            "source_event_at",
+            "history/completeness predicates"
+          ],
+          "getBlock_unrelated_transactions": "remain opaque to all precommit-visible outputs",
+          "non_initialization_cpmm_transaction": "may be classified as NON_INITIALIZATION for completeness accounting only; swap recipient, order, and acquisition semantics must not be decoded or output",
+          "boundary_output": "CENSUS_PRECOMMIT_VIEW only"
+        },
+        "process_capability_separation": {
+          "sole_input_from_census": "CENSUS_PRECOMMIT_VIEW",
+          "sole_input_into": [
+            "FINAL_ELIGIBLE_UNIVERSE construction",
+            "audit universe snapshot construction",
+            "universe_digest",
+            "selected-list derivation"
+          ],
+          "selector_receives_raw_provider_response": false,
+          "operator_discretion_based_on_quarantined_evidence": false,
+          "first_buyer_logic_raw_census_access_precommit": false,
+          "direct_chain_audit_logic_raw_census_access_precommit": false,
+          "census_raw_bytes_decision_relevant_precommit": false
+        },
+        "fail_closed": {
+          "trigger": "any first-buyer- or direct-audit-relevant outcome information from census raw responses becomes visible outside the isolated allowlisted census boundary before AUDIT_SAMPLE_COMMIT_BARRIER=PASS",
+          "PRECOMMIT_OUTCOME_LEAK": "YES",
+          "PACKET_VALID": "NO",
+          "SOURCE_STACK_QUALIFIED": "NO",
+          "same_qualification_episode_stops": true,
+          "sample_commitment_may_proceed": false,
+          "redraw_or_recompute_may_proceed": false,
+          "selective_discard_may_proceed": false,
+          "sanitize_and_continue_may_proceed": false
+        }
+      }
     }
   },
   "providers": [
@@ -484,6 +596,8 @@
     "snapshot": "full final eligible universe ledger at window end + 30 minutes; include exactly the ordered array of complete outcome-independent asset objects with fields chain_id, mint_address, pool_address, initialization_signature, initialization_slot, block_transaction_index, candidate_vault, quote_vault, and source_event_at; freeze it only after CENSUS_COMPLETE=YES and FINAL_ELIGIBLE_UNIVERSE is sealed; serialize its UTF-8 JSON bytes with RFC8785/JSON Canonicalization Scheme (JCS) and commit SHA-256 before FIRST_BUYER_REQUEST_STARTED or DIRECT_CHAIN_AUDIT_REQUEST_STARTED and before any corresponding result retrieval or inspection",
     "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
     "snapshot_field_contract": {
+      "top_level": "bare JSON array; no wrapper object is permitted; N is the exact array length",
+      "member_object": "every array member is an object with exactly the nine listed members and no others; no member may be missing or null",
       "fields": [
         "chain_id",
         "mint_address",
@@ -495,15 +609,42 @@
         "quote_vault",
         "source_event_at"
       ],
-      "array_order": "canonical asset identity order by (chain_id, mint_address), ascending bytewise UTF-8 order",
+      "field_types": {
+        "chain_id": "JSON string; exact literal \"solana-mainnet-beta\"",
+        "mint_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "pool_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_signature": "JSON string; canonical Solana base58 signature encoding; decode exactly 64 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_slot": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "block_transaction_index": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "candidate_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "quote_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "source_event_at": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden; finalized transaction blockTime"
+      },
+      "array_order": "sort by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; locale comparison is forbidden",
       "object_member_order": "RFC8785/JCS member ordering; application insertion order is not used",
+      "canonical_asset_identity": "exactly the JSON object {\"chain_id\": <exact chain_id>, \"mint_address\": <exact mint_address>} with no additional members",
+      "canonical_asset_identity_bytes": "UTF-8 bytes of the RFC8785/JCS serialization of that exact canonical_asset_identity object",
+      "same_identity_bytes_used_for": [
+        "canonical identity",
+        "snapshot array ordering",
+        "selector identity",
+        "selector tie-break identity"
+      ],
+      "forbidden_identity_encodings": [
+        "chain_id + \"|\" + mint_address",
+        "arbitrary application serialization",
+        "insertion-order JSON"
+      ],
       "encoding": "UTF-8",
-      "digest": "SHA-256 of the RFC8785/JCS UTF-8 bytes, computed before selected-list derivation and before any FIRST_BUYER or DIRECT_CHAIN_AUDIT request starts"
+      "universe_snapshot_bytes": "UTF-8(RFC8785_JCS(exact bare-array universe snapshot))",
+      "universe_digest": "lowercase_hex(SHA256(universe_snapshot_bytes)); exactly 64 lowercase hexadecimal characters",
+      "digest": "SHA-256 of universe_snapshot_bytes, computed before selected-list derivation and before any FIRST_BUYER or DIRECT_CHAIN_AUDIT request starts"
     },
     "sample_size": "min(200,N)",
     "replacement": "without replacement; no discretionary replacement",
     "seed": "smokestack:pr01:source-qualification:audit-v1",
-    "selector": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity), with concatenation encoded as UTF-8, interpreted as unsigned hexadecimal bytes and sorted ascending; equal scores are ordered by canonical asset identity in ascending bytewise UTF-8 order; select the first min(200,N) without replacement",
+    "selector_preimage_bytes": "UTF8(\"smokestack:pr01:source-qualification:audit-v1\") || UTF8(\"|\") || UTF8(universe_digest) || UTF8(\"|\") || canonical_asset_identity_bytes",
+    "selector": "selector_score = SHA256(selector_preimage_bytes); compare raw 32-byte SHA-256 values in ascending unsigned lexicographic byte order; equal scores are ordered by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; select the first min(200,N) without replacement",
     "selected_list_commitment": "build the selected-list commitment object with the exact frozen schema, RFC8785/JCS-canonicalize its UTF-8 bytes, compute SHA-256 as audit_selected_list_digest, and durably seal the object and digest before any FIRST_BUYER_REQUEST_STARTED or DIRECT_CHAIN_AUDIT_REQUEST_STARTED request or any corresponding result retrieval/inspection",
     "unavailable_selected_case": "retained in the committed sample and denominator; failed selected cases cannot be replaced, redrawn, or shrunk"
   },
@@ -529,6 +670,8 @@
     "complete_census_precondition": "No snapshot, universe_digest, sample size, selected list, commitment object, or barrier result is valid unless CENSUS_COMPLETE=YES is proven and FINAL_ELIGIBLE_UNIVERSE is frozen from the complete outcome-independent census.",
     "final_eligible_universe": "The frozen complete census membership ledger is the sole source of the audit universe. Later provider success/failure, parse status, first-buyer claims, chain-audit results, agreement, price, volume, survival, attention, or other outcomes cannot add, remove, or alter a member before commitment.",
     "audit_universe_snapshot": {
+      "top_level": "bare JSON array; no wrapper object is permitted; N is the exact array length",
+      "member_object": "every array member is an object with exactly the nine listed members and no others; no member may be missing or null",
       "exact_fields": [
         "chain_id",
         "mint_address",
@@ -540,10 +683,36 @@
         "quote_vault",
         "source_event_at"
       ],
-      "array_order": "canonical asset identity order by (chain_id, mint_address), ascending bytewise UTF-8 order",
+      "field_types": {
+        "chain_id": "JSON string; exact literal \"solana-mainnet-beta\"",
+        "mint_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "pool_address": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_signature": "JSON string; canonical Solana base58 signature encoding; decode exactly 64 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "initialization_slot": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "block_transaction_index": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden",
+        "candidate_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "quote_vault": "JSON string; canonical Solana base58 public-key encoding; decode exactly 32 bytes and canonical re-encoding equals the original string byte-for-byte",
+        "source_event_at": "non-negative JSON integer; Number.isSafeInteger and RFC8785-compatible; booleans, floats, exponent alternatives, strings, and null forbidden; finalized transaction blockTime"
+      },
+      "array_order": "sort by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; locale comparison is forbidden",
+      "canonical_asset_identity": "exactly the JSON object {\"chain_id\": <exact chain_id>, \"mint_address\": <exact mint_address>} with no additional members",
+      "canonical_asset_identity_bytes": "UTF-8 bytes of the RFC8785/JCS serialization of that exact canonical_asset_identity object",
+      "same_identity_bytes_used_for": [
+        "canonical identity",
+        "snapshot array ordering",
+        "selector identity",
+        "selector tie-break identity"
+      ],
+      "forbidden_identity_encodings": [
+        "chain_id + \"|\" + mint_address",
+        "arbitrary application serialization",
+        "insertion-order JSON"
+      ],
       "canonicalization": "RFC8785 / JSON Canonicalization Scheme (JCS)",
       "encoding": "UTF-8",
-      "digest_field": "universe_digest = SHA-256 of the RFC8785/JCS UTF-8 snapshot bytes",
+      "universe_snapshot_bytes": "UTF-8(RFC8785_JCS(exact bare-array universe snapshot))",
+      "universe_digest": "lowercase_hex(SHA256(universe_snapshot_bytes)); exactly 64 lowercase hexadecimal characters",
+      "digest_field": "universe_digest = SHA-256 of universe_snapshot_bytes",
       "derived_before": [
         "FIRST_BUYER_REQUEST_STARTED",
         "FIRST_BUYER result retrieval/inspection",
@@ -554,7 +723,8 @@
     "sample_derivation": {
       "sample_size": "min(200,N)",
       "seed": "smokestack:pr01:source-qualification:audit-v1",
-      "selector": "SHA256(seed + '|' + universe_digest + '|' + canonical_asset_identity), UTF-8 encoded; sort unsigned hexadecimal scores ascending, then canonical asset identity ascending bytewise UTF-8 for equal scores; select the first min(200,N) without replacement",
+      "selector_preimage_bytes": "UTF8(\"smokestack:pr01:source-qualification:audit-v1\") || UTF8(\"|\") || UTF8(universe_digest) || UTF8(\"|\") || canonical_asset_identity_bytes",
+      "selector": "selector_score = SHA256(selector_preimage_bytes); compare raw 32-byte SHA-256 values in ascending unsigned lexicographic byte order; equal scores are ordered by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order; select the first min(200,N) without replacement",
       "selected_list": "the exact ordered array of selected canonical asset identities, with length sample_size and no duplicate identity",
       "order_frozen": true
     },
@@ -572,10 +742,18 @@
       "member_contract": {
         "contract_id": "string; must equal PR01_SOURCE_QUALIFICATION_PREREGISTRATION_V2",
         "canonical_predecessor": "string; must equal 42bc8003b280affc8da0bb484ea9468da32bb656",
-        "universe_digest": "exactly the 64 lowercase hexadecimal SHA-256 digest of the canonical audit universe snapshot",
-        "sample_size": "integer; must equal min(200,N)",
-        "selector_seed": "must equal smokestack:pr01:source-qualification:audit-v1",
-        "selected_asset_identities": "array of exactly sample_size unique {chain_id,mint_address} objects in the frozen selector score order"
+        "universe_digest": "JSON string; exactly the 64 lowercase hexadecimal SHA-256 digest of the canonical audit universe snapshot",
+        "sample_size": "JSON integer; must equal min(200,N)",
+        "selector_seed": "JSON string; must equal smokestack:pr01:source-qualification:audit-v1",
+        "selected_asset_identities": "JSON array of exactly sample_size unique canonical identity objects in the frozen selector score order"
+      },
+      "field_types": {
+        "contract_id": "JSON string",
+        "canonical_predecessor": "JSON string",
+        "universe_digest": "JSON string",
+        "sample_size": "JSON integer; no quotes, null, boolean, float, or exponent alternative",
+        "selector_seed": "JSON string",
+        "selected_asset_identities": "JSON array; each member is exactly {chain_id, mint_address} with no extra members, no nulls, and no duplicates"
       },
       "no_extra_members": true,
       "selected_list_is_not_a_replacement_pool": true
@@ -584,7 +762,7 @@
       "method": "RFC8785 / JSON Canonicalization Scheme (JCS)",
       "encoding": "UTF-8",
       "input": "the complete selected-list commitment object with exactly the required members and no extra members",
-      "digest": "audit_selected_list_digest = SHA-256 of the canonical UTF-8 commitment-object bytes",
+      "digest": "audit_selected_list_digest = lowercase_hex(SHA256(exact RFC8785/JCS UTF-8 commitment-object bytes)); exactly 64 lowercase hexadecimal characters",
       "digest_is_bound_to": [
         "canonical_predecessor",
         "universe_digest",
@@ -712,7 +890,7 @@
       },
       "market_state": {
         "ceiling": 40000,
-        "order": "final eligible universe members sorted by (chain_id, mint_address) ascending bytewise UTF-8 order",
+        "order": "final eligible universe members sorted by canonical_asset_identity_bytes in ascending unsigned bytewise lexical order",
         "max_request_calls_per_asset": 8,
         "max_charged_attempts_per_asset": 24,
         "retry_charging": "each initial request and up to two retry attempts is charged; the 24-call worst case is reserved before execution",
@@ -788,6 +966,12 @@
     "SOURCE_STACK_QUALIFIED": "NO",
     "PR02_STARTED": "NO",
     "CENSUS_COMPLETE_BEFORE_SAMPLE_COMMIT": "PASS",
+    "CENSUS_PRECOMMIT_INFORMATION_FIREWALL": "PASS",
+    "CENSUS_SELECTION_VIEW_ALLOWLIST_FROZEN": "PASS",
+    "CENSUS_RAW_RESPONSE_PRECOMMIT_OPAQUE": "PASS",
+    "FIRST_BUYER_OUTCOME_VISIBLE_PRECOMMIT": "NO",
+    "DIRECT_AUDIT_OUTCOME_VISIBLE_PRECOMMIT": "NO",
+    "PRECOMMIT_OUTCOME_LEAK_FAIL_CLOSED": "PASS",
     "RFC8785_JCS_UNIVERSE_SNAPSHOT": "PASS",
     "AUDIT_SAMPLE_DERIVED_FROM_PRE_RESULT_UNIVERSE_ONLY": "PASS",
     "AUDIT_SELECTED_LIST_SCHEMA_FROZEN": "PASS",
