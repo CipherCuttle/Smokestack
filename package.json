@@ -11,9 +11,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/test/foundation.test.js",
+    "test": "npm run build && node --test dist/test/foundation.test.js dist/test/witness.test.js",
     "check": "npm run typecheck && npm run test",
-    "smokestack": "node dist/src/cli.js"
+    "smokestack": "node dist/src/cli.js",
+    "witness": "node dist/src/witness/service.js"
   },
   "devDependencies": {
     "@types/node": "24.10.9",
