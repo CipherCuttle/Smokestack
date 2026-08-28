@@ -2,7 +2,7 @@ import { type KeyObject } from 'node:crypto';
 import { canonicalize, sha256 } from './canonical.js';
 import { verifyCheckpoint, publicKeyFromWire, verifyReceipt } from './crypto.js';
 import { validateRecord } from './protocol.js';
-import type { JsonObject, WitnessCheckpoint, WitnessRecord, WitnessReceipt, VerifyConsistencyResult, VerifyInclusionResult } from './types.js';
+import type { JsonObject, WitnessCheckpoint, WitnessRecord, WitnessReceipt, VerifyConsistencyResult, VerifyCurrentLineageResult, VerifyInclusionResult } from './types.js';
 
 interface ImmutableRecordFields {
   namespace: string;
@@ -125,6 +125,7 @@ export function verifyConsistency(publicKey: KeyObject | string, oldCheckpoint: 
   return { valid: true, reason: 'new checkpoint is an append-only extension' };
 }
 
+/** Historical inclusion only; this does not establish that the supplied checkpoint is current. */
 export function verifyReceiptAndInclusion(publicKey: KeyObject | string, receipt: WitnessReceipt, records: WitnessRecord[]): VerifyInclusionResult {
   let key: KeyObject;
   try {
@@ -136,6 +137,16 @@ export function verifyReceiptAndInclusion(publicKey: KeyObject | string, receipt
     return { valid: false, reason: 'receipt signature or digest invalid' };
   }
   return verifyInclusion(key, receipt.checkpoint, records, receipt.sequence);
+}
+
+/**
+ * Verify a target record against a checkpoint obtained from CURRENT_CHECKPOINT
+ * and a complete history ending at that checkpoint. Receipt verification alone
+ * remains historical inclusion evidence.
+ */
+export function verifyCurrentLineage(publicKey: KeyObject | string, currentCheckpoint: WitnessCheckpoint, records: WitnessRecord[], targetSequence: number): VerifyCurrentLineageResult {
+  const result = verifyInclusion(publicKey, currentCheckpoint, records, targetSequence);
+  return { ...result, evidence_scope: 'CURRENT_LINEAGE' };
 }
 
 export function recordImmutableCanonicalBytes(record: WitnessRecord): Buffer {

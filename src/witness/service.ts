@@ -6,7 +6,7 @@ import { canonicalize, nowUtcSecond, requireExactKeys, requireJsonObject, requir
 import { WitnessProtocolError, protocolError } from './errors.js';
 import { validateAppendEventRequest, validateCheckpoint, validateClaimRequest, validateNamespaceIdentity, validateReadRequest, validateRecord, validateRootRequest } from './protocol.js';
 import { verifyConsistency, verifyInclusion } from './verification.js';
-import { WitnessStore, type InternalAppendResult, type InternalClaimResult } from './store.js';
+import { WitnessStore, type InternalAppendResult, type InternalClaimResult, type WitnessStoreIdentity } from './store.js';
 import type { CheckpointBody, JsonObject, WitnessCheckpoint, WitnessReceipt, WitnessRecord } from './types.js';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -15,6 +15,8 @@ interface ServiceConfig {
   host: string;
   port: number;
   databasePath: string;
+  deploymentId: string;
+  databaseInstanceId: string;
   signingKeyPath: string;
   runtimeToken: string;
   adminToken: string;
@@ -55,9 +57,14 @@ function initializeRuntime(environment: NodeJS.ProcessEnv): ServiceRuntime {
       reasons.push('signing_identity_unavailable');
     }
   }
-  if (configResult.databasePath.length > 0) {
+  if (configResult.databasePath.length > 0 && configResult.deploymentId.length > 0 && configResult.databaseInstanceId.length > 0 && runtime.keyId !== undefined) {
     try {
-      runtime.store = new WitnessStore(configResult.databasePath, {
+      const identity: WitnessStoreIdentity = {
+        deployment_id: configResult.deploymentId,
+        database_instance_id: configResult.databaseInstanceId,
+        signing_key_id: runtime.keyId,
+      };
+      runtime.store = new WitnessStore(configResult.databasePath, identity, {
         beforeCommit: (operation) => {
           if (configResult.crashPoint === `${operation}_before_commit`) {
             process.kill(process.pid, 'SIGKILL');
@@ -86,11 +93,19 @@ function readConfig(environment: NodeJS.ProcessEnv, reasons: string[]): ServiceC
     reasons.push('invalid_listener_configuration');
   }
   const databasePath = environment.WITNESS_DATABASE_PATH ?? '';
+  const deploymentId = environment.WITNESS_DEPLOYMENT_ID ?? '';
+  const databaseInstanceId = environment.WITNESS_DATABASE_INSTANCE_ID ?? '';
   const signingKeyPath = environment.WITNESS_SIGNING_KEY_PATH ?? '';
   const runtimeToken = environment.WITNESS_RUNTIME_TOKEN ?? '';
   const adminToken = environment.WITNESS_ADMIN_TOKEN ?? '';
   if (databasePath.length === 0) {
     reasons.push('missing_persistence_configuration');
+  }
+  if (deploymentId.length === 0) {
+    reasons.push('missing_deployment_identity');
+  }
+  if (databaseInstanceId.length === 0) {
+    reasons.push('missing_database_instance_identity');
   }
   if (signingKeyPath.length === 0) {
     reasons.push('missing_signing_key_reference');
@@ -101,7 +116,7 @@ function readConfig(environment: NodeJS.ProcessEnv, reasons: string[]): ServiceC
   if (adminToken.length < 16 || adminToken === runtimeToken) {
     reasons.push('invalid_admin_credential_configuration');
   }
-  return { host, port, databasePath, signingKeyPath, runtimeToken, adminToken, crashPoint: environment.WITNESS_TEST_CRASH_POINT };
+  return { host, port, databasePath, deploymentId, databaseInstanceId, signingKeyPath, runtimeToken, adminToken, crashPoint: environment.WITNESS_TEST_CRASH_POINT };
 }
 
 async function handleRequest(runtime: ServiceRuntime, request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -177,7 +192,12 @@ async function handleRequest(runtime: ServiceRuntime, request: IncomingMessage, 
       namespace = parsed.namespace;
       const record = runtime.store.readEvent(parsed.namespace, parsed.namespaceGenesisId, parsed.sequence);
       const root = runtime.store.namespace(parsed.namespace, parsed.namespaceGenesisId);
-      const checkpoint = checkpointFor(runtime.signer, root, record.sequence, record.record_digest, record.included_at, runtime.keyId);
+      const records = runtime.store.listEvents(parsed.namespace, parsed.namespaceGenesisId);
+      const head = records.at(-1);
+      if (head === undefined) {
+        protocolError('CORRUPT_PERSISTENCE', 'namespace has no current head', 503);
+      }
+      const checkpoint = checkpointFor(runtime.signer, root, head.sequence, head.record_digest, nowUtcSecond(), runtime.keyId);
       const receipt = receiptFor(runtime.signer, record, checkpoint, runtime.keyId);
       status = 200;
       sendJson(response, status, { record, receipt, checkpoint });

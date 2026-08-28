@@ -61,6 +61,9 @@ Positive:
   commit in one serialized transaction;
 - receipts and checkpoints can be verified with only the witness public key
   and returned proof material;
+- historical reads return the actual current checkpoint, while receipt
+  verification remains historical inclusion evidence and current-lineage
+  verification requires complete enumeration and consistency checks;
 - crash, restart, corruption, and runtime-permission behavior are directly
   testable.
 
@@ -70,4 +73,7 @@ Boundaries:
   failover design;
 - SQLite must be replaced or separately justified if a later deployment
   requirement exceeds the V0 single-service boundary;
+- witness database initialization is a separate one-time deployment operation;
+  normal service startup opens an existing database only and verifies its
+  deployment, database-instance, and signing-key identities;
 - this ADR does not authorize production deployment or any V5 live action.

@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { canonicalize, nowUtcSecond, parseStoredJson, requireExactKeys, requireJsonObject, requireString, sha256 } from './canonical.js';
@@ -50,6 +50,14 @@ interface WitnessStoreHooks {
   beforeCommit?: (operation: 'root' | 'claim' | 'append') => void;
 }
 
+export interface WitnessStoreIdentity {
+  deployment_id: string;
+  database_instance_id: string;
+  signing_key_id: string;
+}
+
+const STORE_METADATA_KEYS = ['database_instance_id', 'deployment_id', 'schema_version', 'signing_key_id'] as const;
+
 export interface InternalClaimResult {
   record: WitnessRecord;
   episode_binding: EpisodeBinding;
@@ -63,17 +71,67 @@ export function genesisIdFor(namespace: string, genesisPayloadDigest: string, ge
   return `witness-genesis-v0-${sha256({ namespace, genesis_payload_digest: genesisPayloadDigest, genesis_record_digest: genesisRecordDigest })}`;
 }
 
+export function initializeWitnessDatabase(databasePath: string, identity: WitnessStoreIdentity): void {
+  validateStoreIdentity(identity);
+  if (existsSync(databasePath)) {
+    protocolError('PERSISTENCE_ALREADY_INITIALIZED', 'witness database path already exists; initialization is one-time only', 409);
+  }
+  mkdirSync(dirname(databasePath), { recursive: true });
+  const database = new DatabaseSync(databasePath, { timeout: 5000, enableForeignKeyConstraints: true });
+  try {
+    configureDatabase(database);
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      createSchema(database);
+      for (const [key, value] of [
+        ['schema_version', '1'],
+        ['deployment_id', identity.deployment_id],
+        ['database_instance_id', identity.database_instance_id],
+        ['signing_key_id', identity.signing_key_id],
+      ] as const) {
+        database.prepare('INSERT INTO schema_meta (key, value) VALUES (?, ?)').run(key, value);
+      }
+      database.exec('COMMIT');
+    } catch (error) {
+      if (database.isTransaction) {
+        database.exec('ROLLBACK');
+      }
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+
 export class WitnessStore {
   private readonly database: DatabaseSync;
   private readonly hooks: WitnessStoreHooks;
 
-  public constructor(databasePath: string, hooks: WitnessStoreHooks = {}) {
-    mkdirSync(dirname(databasePath), { recursive: true });
-    this.database = new DatabaseSync(databasePath, { timeout: 5000, enableForeignKeyConstraints: true });
+  public constructor(databasePath: string, identity: WitnessStoreIdentity, hooks: WitnessStoreHooks = {}) {
+    validateStoreIdentity(identity);
+    const beforeOpen = existingDatabaseStat(databasePath);
+    let database: DatabaseSync;
+    try {
+      database = new DatabaseSync(databasePath, { timeout: 5000, enableForeignKeyConstraints: true });
+    } catch {
+      protocolError('PERSISTENCE_UNAVAILABLE', 'witness database could not be opened', 503);
+    }
+    let afterOpen: { dev: number; ino: number };
+    try {
+      afterOpen = existingDatabaseStat(databasePath);
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+    if (beforeOpen.dev !== afterOpen.dev || beforeOpen.ino !== afterOpen.ino) {
+      database.close();
+      protocolError('PERSISTENCE_REPLACED', 'witness database changed while opening', 503);
+    }
+    this.database = database;
     this.hooks = hooks;
     try {
-      this.database.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
-      this.initializeSchema();
+      configureDatabase(this.database);
+      this.verifyStoreIdentity(identity);
       this.verifyIntegrity();
     } catch (error) {
       this.database.close();
@@ -243,59 +301,19 @@ export class WitnessStore {
     }
   }
 
-  private initializeSchema(): void {
-    this.database.exec(`
-      CREATE TABLE IF NOT EXISTS schema_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      ) STRICT;
-      CREATE TABLE IF NOT EXISTS namespaces (
-        namespace TEXT PRIMARY KEY,
-        genesis_id TEXT NOT NULL UNIQUE,
-        genesis_digest TEXT NOT NULL,
-        genesis_payload TEXT NOT NULL,
-        head_sequence INTEGER NOT NULL,
-        head_record_digest TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      ) STRICT;
-      CREATE TABLE IF NOT EXISTS records (
-        namespace TEXT NOT NULL,
-        sequence INTEGER NOT NULL,
-        record_type TEXT NOT NULL,
-        payload_digest TEXT NOT NULL,
-        previous_record_digest TEXT,
-        record_digest TEXT NOT NULL,
-        included_at TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        PRIMARY KEY (namespace, sequence),
-        UNIQUE (namespace, record_digest),
-        FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
-      ) STRICT;
-      CREATE TABLE IF NOT EXISTS intervals (
-        namespace TEXT NOT NULL,
-        window_claim_key TEXT NOT NULL,
-        start_ms INTEGER NOT NULL,
-        end_ms INTEGER NOT NULL,
-        claim_sequence INTEGER NOT NULL,
-        PRIMARY KEY (namespace, window_claim_key),
-        UNIQUE (namespace, claim_sequence),
-        FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
-      ) STRICT;
-      CREATE TABLE IF NOT EXISTS episodes (
-        namespace TEXT NOT NULL,
-        episode_id TEXT NOT NULL,
-        binding TEXT NOT NULL,
-        state TEXT NOT NULL,
-        claim_sequence INTEGER NOT NULL,
-        PRIMARY KEY (namespace, episode_id),
-        UNIQUE (namespace, claim_sequence),
-        FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
-      ) STRICT;
-    `);
-    this.database.prepare("INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1')").run();
-    const version = this.database.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as unknown as { value: string } | undefined;
-    if (version?.value !== '1') {
-      protocolError('SCHEMA_INCOMPATIBLE', 'witness schema version is incompatible', 503);
+  private verifyStoreIdentity(identity: WitnessStoreIdentity): void {
+    let rows: Array<{ key: string; value: string }>;
+    try {
+      rows = this.database.prepare('SELECT key, value FROM schema_meta ORDER BY key').all() as unknown as Array<{ key: string; value: string }>;
+    } catch {
+      protocolError('STORE_IDENTITY_MISMATCH', 'witness database identity metadata is missing or malformed', 503);
+    }
+    if (rows.length !== STORE_METADATA_KEYS.length || rows.some((row, index) => row.key !== STORE_METADATA_KEYS[index])) {
+      protocolError('STORE_IDENTITY_MISMATCH', 'witness database identity metadata is missing or malformed', 503);
+    }
+    const metadata = new Map(rows.map((row) => [row.key, row.value]));
+    if (metadata.get('schema_version') !== '1' || metadata.get('deployment_id') !== identity.deployment_id || metadata.get('database_instance_id') !== identity.database_instance_id || metadata.get('signing_key_id') !== identity.signing_key_id) {
+      protocolError('STORE_IDENTITY_MISMATCH', 'witness database identity does not match deployment or signing identity', 503);
     }
   }
 
@@ -486,6 +504,80 @@ export class WitnessStore {
       throw error;
     }
   }
+}
+
+function validateStoreIdentity(identity: WitnessStoreIdentity): void {
+  if (typeof identity.deployment_id !== 'string' || identity.deployment_id.length === 0 || typeof identity.database_instance_id !== 'string' || identity.database_instance_id.length === 0 || typeof identity.signing_key_id !== 'string' || identity.signing_key_id.length === 0) {
+    protocolError('INVALID_STORE_IDENTITY', 'witness deployment, database, and signing identities are required', 503);
+  }
+}
+
+function existingDatabaseStat(databasePath: string): { dev: number; ino: number } {
+  let stats: ReturnType<typeof statSync>;
+  try {
+    stats = statSync(databasePath);
+  } catch {
+    protocolError('PERSISTENCE_UNAVAILABLE', 'witness database path does not exist', 503);
+  }
+  if (!stats.isFile() || stats.size === 0) {
+    protocolError('PERSISTENCE_UNINITIALIZED', 'witness database path is empty or not a regular file', 503);
+  }
+  return { dev: stats.dev, ino: stats.ino };
+}
+
+function configureDatabase(database: DatabaseSync): void {
+  database.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
+}
+
+function createSchema(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE schema_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE namespaces (
+      namespace TEXT PRIMARY KEY,
+      genesis_id TEXT NOT NULL UNIQUE,
+      genesis_digest TEXT NOT NULL,
+      genesis_payload TEXT NOT NULL,
+      head_sequence INTEGER NOT NULL,
+      head_record_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE records (
+      namespace TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      record_type TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      previous_record_digest TEXT,
+      record_digest TEXT NOT NULL,
+      included_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      PRIMARY KEY (namespace, sequence),
+      UNIQUE (namespace, record_digest),
+      FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
+    ) STRICT;
+    CREATE TABLE intervals (
+      namespace TEXT NOT NULL,
+      window_claim_key TEXT NOT NULL,
+      start_ms INTEGER NOT NULL,
+      end_ms INTEGER NOT NULL,
+      claim_sequence INTEGER NOT NULL,
+      PRIMARY KEY (namespace, window_claim_key),
+      UNIQUE (namespace, claim_sequence),
+      FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
+    ) STRICT;
+    CREATE TABLE episodes (
+      namespace TEXT NOT NULL,
+      episode_id TEXT NOT NULL,
+      binding TEXT NOT NULL,
+      state TEXT NOT NULL,
+      claim_sequence INTEGER NOT NULL,
+      PRIMARY KEY (namespace, episode_id),
+      UNIQUE (namespace, claim_sequence),
+      FOREIGN KEY (namespace) REFERENCES namespaces(namespace)
+    ) STRICT;
+  `);
 }
 
 function isJsonObjectValue(value: unknown): value is JsonObject {

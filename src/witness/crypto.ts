@@ -138,7 +138,7 @@ export function verifyReceipt(publicKey: KeyObject, receipt: WitnessReceipt): bo
     if (!verifyCheckpoint(publicKey, receipt.checkpoint)) {
       return false;
     }
-    if (receipt.namespace !== receipt.checkpoint.namespace || receipt.key_id !== receipt.checkpoint.key_id || receipt.included_at !== receipt.checkpoint.checkpoint_time || receipt.sequence !== receipt.checkpoint.head_sequence || receipt.record_digest !== receipt.checkpoint.head_record_digest || receipt.checkpoint_digest !== receipt.checkpoint.checkpoint_digest) {
+    if (receipt.namespace !== receipt.checkpoint.namespace || receipt.key_id !== receipt.checkpoint.key_id || receipt.checkpoint_digest !== receipt.checkpoint.checkpoint_digest) {
       return false;
     }
     const digest = sha256(receiptBody(receipt) as unknown as JsonObject);

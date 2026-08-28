@@ -14,7 +14,8 @@
     "test": "npm run build && node --test dist/test/foundation.test.js dist/test/witness.test.js",
     "check": "npm run typecheck && npm run test",
     "smokestack": "node dist/src/cli.js",
-    "witness": "node dist/src/witness/service.js"
+    "witness": "node dist/src/witness/service.js",
+    "witness:init": "node dist/src/witness/init.js"
   },
   "devDependencies": {
     "@types/node": "24.10.9",

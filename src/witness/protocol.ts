@@ -113,6 +113,9 @@ export function validateClaimRequest(value: unknown): ClaimRequest {
   if (windowClaimKey !== recomputedWindowClaimKey) {
     protocolError('WINDOW_CLAIM_KEY_MISMATCH', 'window_claim_key does not match the exact window object');
   }
+  if (episodeBinding.window_claim_key !== recomputedWindowClaimKey) {
+    protocolError('EPISODE_WINDOW_CLAIM_KEY_MISMATCH', 'episode_binding.window_claim_key does not match the exact window object');
+  }
   return {
     exact_window_object: window,
     window_claim_key: windowClaimKey,

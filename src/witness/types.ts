@@ -127,12 +127,19 @@ export interface ListResult {
 export interface ReadResult {
   record: WitnessRecord;
   receipt: WitnessReceipt;
+  /** The actual current head at read time, not a checkpoint for record.sequence. */
   checkpoint: WitnessCheckpoint;
 }
 
 export interface VerifyInclusionResult {
   valid: boolean;
   reason: string;
+}
+
+export interface VerifyCurrentLineageResult {
+  valid: boolean;
+  reason: string;
+  evidence_scope: 'CURRENT_LINEAGE';
 }
 
 export interface VerifyConsistencyResult {

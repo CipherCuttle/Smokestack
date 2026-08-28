@@ -49,6 +49,11 @@ export class WitnessClient {
     return this.json('/v1/events/append', 'POST', { namespace, episode_binding: episodeBinding, event_type: eventType, payload, writer_signature: writerSignature }) as Promise<AppendResult>;
   }
 
+  /**
+   * Returns the historical record plus the actual current namespace checkpoint.
+   * The returned receipt proves historical inclusion only; use listNamespace
+   * and verifyCurrentLineage for current completeness.
+   */
   public async readEvent(namespace: string, namespaceGenesisId: string, sequence: number): Promise<ReadResult> {
     return this.json('/v1/events/read', 'POST', { namespace, namespace_genesis_id: namespaceGenesisId, sequence }) as Promise<ReadResult>;
   }

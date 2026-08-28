@@ -9,9 +9,10 @@ import { createPublicKey, generateKeyPairSync, randomUUID, type KeyObject } from
 import { spawn, type ChildProcess } from 'node:child_process';
 import test from 'node:test';
 import { sha256 } from '../src/witness/canonical.js';
-import { signWriterEvent, publicKeyToWire, verifyReceipt } from '../src/witness/crypto.js';
+import { keyIdForPublicKey, signWriterEvent, publicKeyToWire, verifyReceipt } from '../src/witness/crypto.js';
 import { WitnessClient, type RawResponse } from '../src/witness/client.js';
-import { verifyConsistency, verifyInclusion } from '../src/witness/verification.js';
+import { initializeWitnessDatabase } from '../src/witness/store.js';
+import { verifyConsistency, verifyCurrentLineage, verifyInclusion, verifyReceiptAndInclusion } from '../src/witness/verification.js';
 import type { EpisodeBinding, ExactWindowObject, JsonObject, NamespaceRootResult, TerminalContractBinding, WitnessRecord } from '../src/witness/types.js';
 
 const RUNTIME_TOKEN = 'test-runtime-credential-0123456789';
@@ -23,6 +24,8 @@ interface TestEnvironment {
   databasePath: string;
   keyPath: string;
   port: number;
+  deploymentId: string;
+  databaseInstanceId: string;
   witnessPublicKey: KeyObject;
   witnessPublicKeyWire: string;
 }
@@ -115,7 +118,34 @@ test('server recomputes the window key, binds the full terminal object, and assi
   });
 });
 
-test('claim receipt and interval survive restart and a fresh client cannot bypass consumption', async () => {
+test('WITNESS_H01_CROSS_FIELD_WINDOW_KEY_REJECTED_PRE_MUTATION', async () => {
+  await withEnvironment(async (environment) => {
+    const running = await startService(environment);
+    const namespace = testNamespace();
+    const root = await running.client.namespaceRoot(namespace, rootPayload(namespace));
+    const claim = claimMaterial(namespace, root, 0);
+    const before = databaseSnapshot(environment.databasePath, namespace);
+    const mismatchedBody = {
+      ...claim.body,
+      episode_binding: { ...claim.episodeBinding, window_claim_key: 'f'.repeat(64) },
+    };
+    const rejected = await running.client.raw('/v1/claims/once', 'POST', mismatchedBody);
+    assert.equal(rejected.status, 400);
+    assert.equal(errorCode(rejected), 'EPISODE_WINDOW_CLAIM_KEY_MISMATCH');
+    assert.deepEqual(databaseSnapshot(environment.databasePath, namespace), before);
+    await stopService(running);
+
+    const restarted = await startService(environment);
+    try {
+      assert.equal((await restarted.client.readiness()).status, 200);
+      assert.deepEqual(databaseSnapshot(environment.databasePath, namespace), before);
+    } finally {
+      await stopService(restarted);
+    }
+  });
+});
+
+test('WITNESS_H03_VALID_EXISTING_DATABASE_RESTARTS', async () => {
   await withEnvironment(async (environment) => {
     const firstService = await startService(environment);
     const namespace = testNamespace();
@@ -179,6 +209,30 @@ test('crash before commit rolls back claim and crash after commit leaves discove
     } finally {
       await stopService(recoveredAfterCommit);
     }
+  });
+});
+
+test('WITNESS_H02_HISTORICAL_READ_BINDS_CURRENT_HEAD', async () => {
+  await withService(async ({ environment, running }) => {
+    const { namespace, root, claim, history } = await advancedHistory(running);
+    const read = await running.client.readEvent(namespace, root.namespace_genesis_id, claim.record.sequence);
+    assert.equal(read.record.sequence, 1);
+    assert.equal(read.checkpoint.head_sequence, 2);
+    assert.equal(verifyReceipt(environment.witnessPublicKey, read.receipt), true);
+    assert.equal(verifyReceiptAndInclusion(environment.witnessPublicKey, read.receipt, history.records).valid, true);
+    assert.equal((await running.client.currentCheckpoint(namespace, root.namespace_genesis_id)).head_sequence, 2);
+  });
+});
+
+test('WITNESS_H02_OLD_RECEIPT_NOT_CURRENT_COMPLETENESS', async () => {
+  await withService(async ({ environment, running }) => {
+    const { namespace, root, claim, history } = await advancedHistory(running);
+    const current = await running.client.currentCheckpoint(namespace, root.namespace_genesis_id);
+    assert.equal(verifyReceipt(environment.witnessPublicKey, claim.receipt), true);
+    assert.equal(verifyReceiptAndInclusion(environment.witnessPublicKey, claim.receipt, history.records.slice(0, 2)).valid, true);
+    assert.equal(verifyCurrentLineage(environment.witnessPublicKey, current, history.records, claim.record.sequence).valid, true);
+    assert.equal(verifyCurrentLineage(environment.witnessPublicKey, current, history.records.slice(0, 2), claim.record.sequence).valid, false);
+    assert.equal(verifyConsistency(environment.witnessPublicKey, claim.receipt.checkpoint, current, history.records).valid, true);
   });
 });
 
@@ -284,6 +338,8 @@ test('startup integrity failure is fail-closed and runtime credentials have no d
     assert.equal(noDeleteRoute.status, 404);
     const noAdminRoute = await running.client.raw('/v1/admin/truncate', 'POST', { namespace });
     assert.equal(noAdminRoute.status, 404);
+    const noInitRoute = await running.client.raw('/v1/witness/init', 'POST', {});
+    assert.equal(noInitRoute.status, 404);
     const arbitraryStart = await running.client.raw('/v1/namespaces/list', 'POST', { namespace, namespace_genesis_id: root.namespace_genesis_id, from_sequence: 1 });
     assert.equal(arbitraryStart.status, 400);
     const mismatch = await running.client.raw('/v1/namespaces/root', 'POST', { namespace, frozen_genesis_payload: { ...rootPayload(namespace), changed: true } });
@@ -304,6 +360,60 @@ test('missing signing identity keeps the process alive but blocks witness operat
       assert.equal(root.status, 503);
     } finally {
       await stopService(service);
+    }
+  });
+});
+
+test('WITNESS_H03_MISSING_DATABASE_FAILS_CLOSED', async () => {
+  await withEnvironment(async (environment) => {
+    const valid = await startService(environment);
+    await stopService(valid);
+    await removeDatabaseFiles(environment.databasePath);
+    const failed = await startService(environment);
+    try {
+      assert.equal((await failed.client.readiness()).status, 503);
+      assert.equal((await failed.client.raw('/v1/namespaces/root', 'POST', { namespace: testNamespace(), frozen_genesis_payload: { protocol_id: 'test' } })).status, 503);
+    } finally {
+      await stopService(failed);
+    }
+  });
+});
+
+test('WITNESS_H03_EMPTY_DATABASE_FAILS_CLOSED', async () => {
+  await withEnvironment(async (environment) => {
+    const valid = await startService(environment);
+    await stopService(valid);
+    await removeDatabaseFiles(environment.databasePath);
+    await writeFile(environment.databasePath, '');
+    const failed = await startService(environment);
+    try {
+      assert.equal((await failed.client.readiness()).status, 503);
+      assert.equal((await failed.client.raw('/v1/namespaces/root', 'POST', { namespace: testNamespace(), frozen_genesis_payload: { protocol_id: 'test' } })).status, 503);
+    } finally {
+      await stopService(failed);
+    }
+  });
+});
+
+test('WITNESS_H03_DEPLOYMENT_ID_MISMATCH_FAILS_CLOSED', async () => {
+  await assertIdentityMismatch({ WITNESS_DEPLOYMENT_ID: 'wrong-deployment-id' });
+});
+
+test('WITNESS_H03_DATABASE_INSTANCE_MISMATCH_FAILS_CLOSED', async () => {
+  await assertIdentityMismatch({ WITNESS_DATABASE_INSTANCE_ID: 'wrong-database-instance-id' });
+});
+
+test('WITNESS_H03_SIGNING_KEY_MISMATCH_FAILS_CLOSED', async () => {
+  await withEnvironment(async (environment) => {
+    const wrongKey = generateKeyPairSync('ed25519', { privateKeyEncoding: { format: 'pem', type: 'pkcs8' }, publicKeyEncoding: { format: 'der', type: 'spki' } });
+    const wrongKeyPath = join(environment.directory, 'wrong-signing-key.pem');
+    await writeFile(wrongKeyPath, wrongKey.privateKey, { mode: 0o600 });
+    const failed = await startService(environment, undefined, { WITNESS_SIGNING_KEY_PATH: wrongKeyPath });
+    try {
+      assert.equal((await failed.client.readiness()).status, 503);
+      assert.equal((await failed.client.raw('/v1/namespaces/root', 'POST', { namespace: testNamespace(), frozen_genesis_payload: { protocol_id: 'test' } })).status, 503);
+    } finally {
+      await stopService(failed);
     }
   });
 });
@@ -338,11 +448,20 @@ async function provisionEnvironment(): Promise<TestEnvironment> {
   });
   await writeFile(keyPath, pair.privateKey, { mode: 0o600 });
   const actualPublicKey = createPublicKey({ key: pair.publicKey, format: 'der', type: 'spki' });
+  const deploymentId = `test-deployment-${randomUUID()}`;
+  const databaseInstanceId = `test-database-${randomUUID()}`;
+  initializeWitnessDatabase(databasePath, {
+    deployment_id: deploymentId,
+    database_instance_id: databaseInstanceId,
+    signing_key_id: keyIdForPublicKey(actualPublicKey),
+  });
   return {
     directory,
     databasePath,
     keyPath,
     port: await freePort(),
+    deploymentId,
+    databaseInstanceId,
     witnessPublicKey: actualPublicKey,
     witnessPublicKeyWire: publicKeyToWire(actualPublicKey),
   };
@@ -355,6 +474,8 @@ async function startService(environment: TestEnvironment, crashPoint?: string, o
       WITNESS_HOST: '127.0.0.1',
       WITNESS_PORT: String(environment.port),
       WITNESS_DATABASE_PATH: environment.databasePath,
+      WITNESS_DEPLOYMENT_ID: environment.deploymentId,
+      WITNESS_DATABASE_INSTANCE_ID: environment.databaseInstanceId,
       WITNESS_SIGNING_KEY_PATH: environment.keyPath,
       WITNESS_RUNTIME_TOKEN: RUNTIME_TOKEN,
       WITNESS_ADMIN_TOKEN: ADMIN_TOKEN,
@@ -423,6 +544,52 @@ async function freePort(): Promise<number> {
       const port = address.port;
       server.close((error) => error === undefined ? resolve(port) : reject(error));
     });
+  });
+}
+
+async function advancedHistory(running: RunningService): Promise<{ namespace: string; root: NamespaceRootResult; claim: Awaited<ReturnType<WitnessClient['claimOnce']>>; history: Awaited<ReturnType<WitnessClient['listNamespace']>> }> {
+  const namespace = testNamespace();
+  const root = await running.client.namespaceRoot(namespace, rootPayload(namespace));
+  const material = claimMaterial(namespace, root, 0);
+  const claim = await running.client.claimOnce(material.window, material.windowClaimKey, material.episodeBinding, material.terminalBinding);
+  const payload = { anchor: 'test' };
+  const signature = signWriterEvent(material.writer.privateKey, namespace, material.episodeBinding, 'CLAIM_ANCHORED', payload);
+  await running.client.appendEvent(namespace, material.episodeBinding, 'CLAIM_ANCHORED', payload, signature);
+  const history = await running.client.listNamespace(namespace, root.namespace_genesis_id);
+  return { namespace, root, claim, history };
+}
+
+function databaseSnapshot(databasePath: string, namespace: string): { head_sequence: number | null; head_record_digest: string | null; records: number; intervals: number; episodes: number } {
+  const database = new DatabaseSync(databasePath);
+  const root = database.prepare('SELECT head_sequence, head_record_digest FROM namespaces WHERE namespace = ?').get(namespace) as unknown as { head_sequence: number; head_record_digest: string } | undefined;
+  const snapshot = {
+    head_sequence: root?.head_sequence ?? null,
+    head_record_digest: root?.head_record_digest ?? null,
+    records: (database.prepare('SELECT COUNT(*) AS count FROM records WHERE namespace = ?').get(namespace) as unknown as { count: number }).count,
+    intervals: (database.prepare('SELECT COUNT(*) AS count FROM intervals WHERE namespace = ?').get(namespace) as unknown as { count: number }).count,
+    episodes: (database.prepare('SELECT COUNT(*) AS count FROM episodes WHERE namespace = ?').get(namespace) as unknown as { count: number }).count,
+  };
+  database.close();
+  return snapshot;
+}
+
+async function removeDatabaseFiles(databasePath: string): Promise<void> {
+  await Promise.all([
+    rm(databasePath, { force: true }),
+    rm(`${databasePath}-wal`, { force: true }),
+    rm(`${databasePath}-shm`, { force: true }),
+  ]);
+}
+
+async function assertIdentityMismatch(overrides: Record<string, string>): Promise<void> {
+  await withEnvironment(async (environment) => {
+    const failed = await startService(environment, undefined, overrides);
+    try {
+      assert.equal((await failed.client.readiness()).status, 503);
+      assert.equal((await failed.client.raw('/v1/namespaces/root', 'POST', { namespace: testNamespace(), frozen_genesis_payload: { protocol_id: 'test' } })).status, 503);
+    } finally {
+      await stopService(failed);
+    }
   });
 }
 
